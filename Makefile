@@ -1,0 +1,123 @@
+# NexusIQ
+#
+# Targets for phases that are not yet implemented print a clear message rather
+# than failing cryptically. See docs/IMPLEMENTATION/ROADMAP.md.
+
+SHELL := /bin/bash
+.DEFAULT_GOAL := help
+
+COMPOSE := docker compose
+ENV_FILE := .env
+
+# Colours
+C := \033[36m
+G := \033[32m
+Y := \033[33m
+R := \033[31m
+D := \033[2m
+N := \033[0m
+
+.PHONY: help setup env check up down restart clean logs ps verify \
+        psql redis-cli topics migrate seed demo test lint eval
+
+help: ## Show this help
+	@echo ""
+	@echo "  NexusIQ — make targets"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(C)%-12s$(N) %s\n", $$1, $$2}'
+	@echo ""
+
+# ---------------------------------------------------------------- setup
+
+env: ## Create .env from .env.example if absent
+	@if [ ! -f $(ENV_FILE) ]; then \
+	  cp .env.example $(ENV_FILE); \
+	  echo -e "$(G)Created .env from .env.example$(N)"; \
+	  echo -e "$(Y)Set POSTGRES_PASSWORD and JWT_SECRET before starting.$(N)"; \
+	else \
+	  echo ".env already exists — leaving it alone"; \
+	fi
+
+check: ## Verify build prerequisites (java, maven, python, node, docker)
+	@./scripts/check-prereqs.sh all
+
+setup: env ## First-time setup: .env + prerequisite check
+	@./scripts/check-prereqs.sh all || true
+	@echo -e "$(D)Service dependencies are installed by their own phases.$(N)"
+
+# ---------------------------------------------------------------- stack
+
+up: ## Start the local stack
+	@./scripts/check-prereqs.sh infra
+	@test -f $(ENV_FILE) || { echo -e "$(R)No .env — run 'make env' first.$(N)"; exit 1; }
+	$(COMPOSE) up -d
+	@echo ""
+	@echo -e "$(D)Waiting for health checks...$(N)"
+	@$(MAKE) --no-print-directory _wait
+	@$(MAKE) --no-print-directory ps
+
+down: ## Stop the stack (volumes preserved)
+	$(COMPOSE) down
+
+restart: down up ## Restart the stack
+
+clean: ## Stop and DESTROY all volumes (deletes every local document, chunk and decision)
+	@echo -e "$(R)This deletes all local data (postgres + kafka volumes).$(N)"
+	@read -p "Type 'yes' to continue: " a; [ "$$a" = "yes" ] || { echo "Aborted."; exit 1; }
+	$(COMPOSE) down -v
+
+logs: ## Tail all service logs
+	$(COMPOSE) logs -f --tail=100
+
+ps: ## Container status
+	@$(COMPOSE) ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+
+_wait:
+	@for i in $$(seq 1 60); do \
+	  unhealthy=$$($(COMPOSE) ps --format json 2>/dev/null \
+	    | grep -c '"Health":"starting"' || true); \
+	  [ "$$unhealthy" = "0" ] && break; \
+	  sleep 3; \
+	done
+
+verify: ## Run the Phase 0 acceptance checks
+	@./scripts/verify-stack.sh
+
+# ---------------------------------------------------------------- access
+
+psql: ## Open a psql shell
+	@$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-nexusiq} -d $${POSTGRES_DB:-nexusiq}
+
+redis-cli: ## Open a redis-cli shell
+	@$(COMPOSE) exec redis redis-cli
+
+topics: ## List Kafka topics
+	@$(COMPOSE) exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+
+# ---------------------------------------------------------------- phases
+
+migrate: ## Apply Flyway migrations (Phase 1)
+	@echo -e "$(Y)Not available yet — Flyway migrations arrive in Phase 1.$(N)"
+
+seed: ## Load the sample enterprise corpus (Phase 2)
+	@echo -e "$(Y)Not available yet — seeding arrives in Phase 2.$(N)"
+
+demo: ## One-command demo bootstrap (Phase 12)
+	@echo -e "$(Y)Not available yet — arrives in Phase 12.$(N)"
+
+test: ## Run all test suites
+	@ran=0; \
+	if [ -f backend/spring-api/pom.xml ]; then (cd backend/spring-api && ./mvnw test) || exit 1; ran=1; fi; \
+	if [ -f ai-service/pyproject.toml ]; then (cd ai-service && uv run pytest) || exit 1; ran=1; fi; \
+	if [ -f frontend/web/package.json ]; then (cd frontend/web && npm test) || exit 1; ran=1; fi; \
+	[ $$ran -eq 1 ] || echo -e "$(Y)No test suites exist yet — services arrive in Phases 1-2.$(N)"
+
+lint: ## Run all linters
+	@ran=0; \
+	if [ -f ai-service/pyproject.toml ]; then (cd ai-service && uv run ruff check app tests && uv run mypy app) || exit 1; ran=1; fi; \
+	if [ -f frontend/web/package.json ]; then (cd frontend/web && npm run lint) || exit 1; ran=1; fi; \
+	[ $$ran -eq 1 ] || echo -e "$(Y)Nothing to lint yet.$(N)"
+
+eval: ## Run the AI evaluation harness (Phase 10)
+	@echo -e "$(Y)Not available yet — the evaluation harness arrives in Phase 10.$(N)"

@@ -1,0 +1,189 @@
+# NexusIQ — local development stack (ADR-010: this is the supported deployment target).
+#
+# Phase 0 provides infrastructure only. The spring-api, ai-service and frontend
+# service definitions are added by their own phases.
+#
+#   make up      start        make down    stop (data preserved)
+#   make ps      status       make clean   stop AND destroy volumes
+#
+# Image versions are pinned deliberately. Verified available for linux/arm64 and
+# linux/amd64 on 2026-08-09.
+#
+# Host ports use a deliberately non-default block (5434 / 6380 / 29093 / 8091 /
+# 4327-4328 / 13134) so NexusIQ can run alongside other local stacks. Override any
+# of them in .env. Container-internal ports are always the standard ones.
+
+name: nexusiq
+
+services:
+
+  # ------------------------------------------------------------------
+  # PostgreSQL + pgvector — the system of record (ADR-001, ADR-002)
+  # ------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: nexusiq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexusiq}
+      POSTGRES_USER: ${POSTGRES_USER:-nexusiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # Deterministic collation so index ordering is reproducible across machines
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "${POSTGRES_EXPOSED_PORT:-5434}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexusiq} -d ${POSTGRES_DB:-nexusiq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Redis — cache / rate limiting / SSE fan-out. Never authoritative.
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: nexusiq-redis
+    restart: unless-stopped
+    # Cache semantics: bounded memory, evict least-recently-used, no persistence
+    # required. Nothing here is unrecoverable (ADR-001).
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    ports:
+      - "${REDIS_EXPOSED_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Kafka — durable async workflows (ADR-003). KRaft, single node.
+  # ------------------------------------------------------------------
+  # Docker creates a named volume's mount point owned by root when the path does
+  # not exist in the image. The Kafka image runs as appuser (uid 1000), so it
+  # cannot format its log dir. This one-shot service fixes ownership first.
+  kafka-init:
+    image: busybox:1.37
+    container_name: nexusiq-kafka-init
+    user: root
+    command: ["sh", "-c", "mkdir -p /data && chown -R 1000:1000 /data"]
+    volumes:
+      - kafka_data:/data
+    networks: [nexusiq]
+
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: nexusiq-kafka
+    restart: unless-stopped
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      # --- KRaft: this node is both broker and controller ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Fixed cluster id so a restart reuses the existing log directory
+      CLUSTER_ID: NexusIQKafkaClusterId0
+
+      # --- Listeners ---
+      # PLAINTEXT  : container-network traffic (spring-api, ai-service, kafka-ui)
+      # EXTERNAL   : host traffic, for running a service outside Docker
+      # CONTROLLER : KRaft quorum, internal only
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # --- Single-node sizing: replication factor 1 everywhere ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+      # Log dir sits under /opt/kafka, which the image's appuser owns.
+      KAFKA_LOG_DIRS: /opt/kafka/data
+    ports:
+      # Host 29093 → container 29092 (the EXTERNAL listener). The advertised
+      # EXTERNAL address must match the host-visible port, hence localhost:29093.
+      - "${KAFKA_EXPOSED_PORT:-29093}:29092"
+    volumes:
+      - kafka_data:/opt/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Kafka UI — topic/consumer-lag/DLQ inspection. Development only.
+  # ------------------------------------------------------------------
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    container_name: nexusiq-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: nexusiq-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "true"
+      SERVER_PORT: 8080
+    ports:
+      - "${KAFKA_UI_PORT:-8091}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # OpenTelemetry Collector (ADR-007).
+  # Phase 0: receives OTLP and logs it. Phase 8 adds Jaeger + Prometheus.
+  # ------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    container_name: nexusiq-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./infrastructure/docker/otel/collector-config.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "${OTEL_GRPC_PORT:-4327}:4317"      # OTLP gRPC
+      - "${OTEL_HTTP_PORT:-4328}:4318"      # OTLP HTTP
+      - "${OTEL_HEALTH_PORT:-13134}:13133"  # health_check extension
+    # No container healthcheck: the collector image is distroless — it has no
+    # shell and no wget/curl, so every CMD/CMD-SHELL probe fails regardless of
+    # the collector's actual state. Health is verified from the host instead
+    # (scripts/verify-stack.sh hits the health_check extension on 13134).
+    networks: [nexusiq]
+
+networks:
+  nexusiq:
+    name: nexusiq
+
+volumes:
+  postgres_data:
+    name: nexusiq_postgres_data
+  kafka_data:
+    name: nexusiq_kafka_data
