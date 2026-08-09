@@ -121,8 +121,19 @@ check "accepts an OTLP/HTTP trace" \
       -d '{\"resourceSpans\":[{\"resource\":{\"attributes\":[{\"key\":\"service.name\",\"value\":{\"stringValue\":\"nexusiq-verify\"}}]},\"scopeSpans\":[{\"spans\":[{\"traceId\":\"5b8efff798038103d269b633813fc60c\",\"spanId\":\"eee19b7ec3c1b174\",\"name\":\"verify-span\",\"kind\":1,\"startTimeUnixNano\":\"1700000000000000000\",\"endTimeUnixNano\":\"1700000001000000000\"}]}]}]}')
     [ \"\$code\" = '200' ] && echo \"HTTP \$code\"
   "
+# The batch processor buffers for up to `timeout` (5s) before exporting, so poll
+# rather than grepping once — a single check races the flush and reports a false
+# failure.
 check "span appears in collector output" \
-  bash -c "docker compose logs --tail=200 otel-collector 2>/dev/null | grep -q 'nexusiq-verify' && echo 'span received'"
+  bash -c "
+    for i in \$(seq 1 15); do
+      if docker compose logs --tail=400 otel-collector 2>/dev/null | grep -q 'nexusiq-verify'; then
+        echo \"span received (after \${i}s)\"; exit 0
+      fi
+      sleep 1
+    done
+    echo 'span not observed in collector output within 15s'; exit 1
+  "
 
 # --- Summary --------------------------------------------------------------
 echo
