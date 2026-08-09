@@ -1,0 +1,76 @@
+# ---- Secrets: never commit ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.crt
+secrets/
+**/credentials.json
+**/service-account*.json
+
+# ---- Java / Maven ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+*.class
+*.jar
+!maven-wrapper.jar
+*.war
+hs_err_pid*
+replay_pid*
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# ---- Model / embedding caches (large, reproducible) ----
+.cache/
+models/
+.huggingface/
+sentence-transformers/
+
+# ---- Node / frontend ----
+node_modules/
+.vite/
+frontend/web/dist/
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Local runtime data ----
+data/
+storage/
+uploads/
+logs/
+*.log
+docker-compose.override.yml
+
+# ---- IDE / OS ----
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# ---- Claude Code ----
+# Shared project config IS committed: CLAUDE.md, .claude/rules, .claude/skills,
+# .claude/settings.json. Personal/local overrides are not.
+.claude/settings.local.json
+.claude/local/
+.claude/memory/
