@@ -50,11 +50,17 @@ GET    /workspaces/{id}/members
 DELETE /workspaces/{id}/members/{userId}    (ADMIN)
 
 # Documents
-POST   /workspaces/{id}/documents           multipart upload → 202
-GET    /workspaces/{id}/documents           paginated, filter by status/type
-GET    /documents/{id}
-GET    /documents/{id}/chunks               paginated (citation resolution)
-DELETE /documents/{id}
+# Nested under the workspace path for every operation, not just create/list —
+# so a lookup by document id always filters on workspace_id in SQL rather than
+# fetching the document globally and checking membership afterward
+# (.claude/rules/security.md, .claude/rules/database.md). Phase 1 ships metadata
+# CRUD only (JSON body, no file content); Phase 2 upgrades POST to a real
+# multipart upload with the same URL shape.
+POST   /workspaces/{id}/documents               metadata create (Phase 1) → multipart upload (Phase 2)
+GET    /workspaces/{id}/documents               paginated, filter by status/type
+GET    /workspaces/{id}/documents/{documentId}
+GET    /workspaces/{id}/documents/{documentId}/chunks   paginated (citation resolution) — Phase 2
+DELETE /workspaces/{id}/documents/{documentId}
 
 # Knowledge search
 POST   /workspaces/{id}/knowledge/search    {query, filters, top_k} → cited results

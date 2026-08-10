@@ -106,7 +106,10 @@ if ! command -v mvn >/dev/null 2>&1; then
 else
   v=$(mvn -version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   if minor_ge "$v" 3 9; then ok "maven" "$v"; else bad "maven" "$v (need 3.9+)"; NOTE=1; fi
-  mj=$(mvn -version 2>/dev/null | grep -i 'Java version' | grep -oE '[0-9]+' | head -1)
+  mjraw=$(mvn -version 2>/dev/null | grep -i 'Java version' | grep -oE '[0-9]+(\.[0-9]+)*' | head -1)
+  # Old-style "1.8.0_392" reports feature version 8, not 1; anything else leads
+  # with the feature version already (e.g. "21.0.12" -> 21).
+  if [[ "$mjraw" == 1.8* ]]; then mj=8; else mj=$(printf '%s' "$mjraw" | grep -oE '^[0-9]+'); fi
   if [[ -n "${mj:-}" && "$mj" -lt 21 ]]; then
     bad "maven/java" "Maven is running on Java $mj, not 21"
     hint "export JAVA_HOME=\$(/usr/libexec/java_home -v 21)"

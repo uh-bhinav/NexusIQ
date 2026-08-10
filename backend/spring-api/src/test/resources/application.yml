@@ -1,0 +1,13 @@
+nexusiq:
+  jwt:
+    # 32+ bytes required by JwtService.init() — fixed value here only so tests are
+    # reproducible; never reuse a fixed secret outside test scope.
+    secret: "test-only-secret-key-not-for-any-real-environment-32bytes-min"
+    access-ttl-seconds: 3600
+    refresh-ttl-seconds: 604800
+  cors:
+    allowed-origins: http://localhost:5173
+
+logging:
+  level:
+    com.nexusiq: DEBUG

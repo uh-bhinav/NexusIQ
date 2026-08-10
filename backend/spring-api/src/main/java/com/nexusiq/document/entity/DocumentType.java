@@ -1,0 +1,12 @@
+package com.nexusiq.document.entity;
+
+public enum DocumentType {
+    SECURITY_POLICY,
+    COMPLIANCE_POLICY,
+    PROCUREMENT_POLICY,
+    ARCHITECTURE_STANDARD,
+    VENDOR_DOCUMENT,
+    HISTORICAL_DECISION,
+    INCIDENT_REPORT,
+    OTHER
+}

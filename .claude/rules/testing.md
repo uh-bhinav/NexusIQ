@@ -30,6 +30,14 @@ Strategy narrative: `docs/TESTING/STRATEGY.md`.
 - Kafka consumers: test idempotency explicitly — deliver the same `event_id` twice, assert one effect.
 - **No H2.** Test against real Postgres with pgvector; H2 lies about SQL.
 - Coverage is a signal, not a target. Meaningful branches covered beats a percentage.
+- **Naming decides which plugin runs a class — this is a real footgun.** `*Test.java` (mocked,
+  no Docker) runs under Surefire via `./mvnw test`. `*IT.java` (Testcontainers-backed) runs under
+  Failsafe via `./mvnw verify` — **not** `./mvnw test`, which silently skips them with exit 0.
+  `pom.xml` binds `maven-failsafe-plugin`'s `integration-test`/`verify` goals for exactly this
+  reason. `make test` runs `mvn verify` so both suites always execute; `make test-unit` runs only
+  the fast Surefire suite. When adding a new integration test class, name it `*IT` and confirm it
+  shows up in a `verify` run's test count — a class that compiles but never executes is worse than
+  a missing one, because it looks covered.
 
 ## Python
 

@@ -5,49 +5,82 @@ every session.** If this file and the repository disagree, the repository is rig
 
 ---
 
-**Last updated:** 2026-08-09
-**Last verified:** 2026-08-09 — `./scripts/verify-stack.sh` → 19/19 checks passed
+**Last updated:** 2026-08-10
+**Last verified:** 2026-08-10 — `./mvnw clean verify` (backend/spring-api) → 50/50 tests passed
 
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 1 — Java backend foundation (**not started**) |
-| **Completed phases** | Phase 0 — Repository & environment ✅ (all 7 acceptance criteria verified) |
-| **Next milestone** | Phase 1 acceptance: register → login → workspace → member, with cross-tenant denial proven |
+| **Current phase** | Phase 2 — Document ingestion (**not started**) |
+| **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ |
+| **Next milestone** | Phase 2 acceptance: upload a PDF → chunks + embeddings land in pgvector |
 
 ## Completed
 
-**Bootstrap (2026-08-09)** — no application code:
-`.claude/` (settings, 7 rules files, 4 skills) · `CLAUDE.md` · docs system (spec, architecture,
-roadmap, status, todo, ADRs 001–010, schema, API design, 8 AI docs, testing, operations) ·
-`.gitignore` · `.env.example`.
+**Bootstrap + Phase 0 (2026-08-09)** — see git history; full detail was previously recorded here
+and is now in `git log` / the Phase 0 commit messages.
 
-**Phase 0 (2026-08-09)** — verified working local stack:
+**Phase 1 — Java backend foundation (2026-08-10):**
 
-- Directory skeleton; module-scoped `CLAUDE.md` pointers in `backend/spring-api`, `ai-service`,
-  `frontend/web` that import the matching rules file.
-- `docker-compose.yml` — postgres+pgvector, redis, kafka (KRaft), kafka-ui, otel-collector,
-  `kafka-init`; healthchecks, named volumes, one network, pinned images.
-- `infrastructure/docker/otel/collector-config.yaml` — OTLP in, debug out (Phase 8 replaces).
-- `Makefile` (18 targets; unbuilt phases print a clear message rather than failing).
-- `scripts/check-prereqs.sh` (`infra` | `all` modes) and `scripts/verify-stack.sh` (19 checks).
-- `.env` generated with real local secrets; port block documented in `.env.example`.
+- Scaffolded `backend/spring-api` from the live Spring Initializr API: **Spring Boot 4.1.0**
+  (verified against Maven Central directly — the metadata-reported id `4.1.0.RELEASE` does not
+  exist as a published artifact; Boot 4.x dropped the `.RELEASE` suffix), Java 21, Spring
+  Framework 7.0.8, Maven wrapper committed.
+- Flyway `V1`–`V4`: extensions (vector/pgcrypto/citext), `users`, `workspaces` +
+  `workspace_members`, `documents` + `knowledge_sources` + `audit_events` with an append-only
+  trigger (`BEFORE UPDATE OR DELETE` → `RAISE EXCEPTION`, DB-enforced, not just omitted from the
+  repository interface).
+- Packages: `common`, `config`, `security`, `auth`, `user`, `workspace`, `document`, `audit` —
+  the ones Phase 1 actually needs; `messaging`/`streaming`/`decision`/`approval` deferred to their
+  phases per "don't build ahead".
+- JWT auth (access + refresh, HS384, BCrypt-12), stateless sessions, `CurrentUser` helper,
+  `WorkspaceAccessService` as the single membership/role check every feature calls through.
+- Endpoints: auth (register/login/refresh/me), workspaces (create/list/get/members add-remove),
+  documents nested under `/workspaces/{id}/documents/...` (metadata-only in Phase 1 — every
+  lookup filters `workspace_id` in SQL, never fetch-then-check), audit (list, resource history).
+- `GlobalExceptionHandler` → standard error envelope; `CorrelationIdFilter` → `X-Correlation-Id` /
+  MDC / `request_id`; Actuator (health/info/metrics); springdoc-openapi 3.1.0 (the Framework-7
+  compatible line) at `/swagger-ui.html`.
+- Timing-safe login (dummy BCrypt comparison on unknown email); self-registration defaults to
+  `ANALYST`, never `ADMIN`/`APPROVER`.
+- Tests: 29 unit (`*Test`, Surefire, mocked) + 21 integration (`*IT`, Failsafe,
+  Testcontainers/pgvector-pg16, real HTTP through the full filter chain) = **50/50 passing**,
+  covering all 9 Phase 1 acceptance criteria including the cross-tenant-denial and
+  append-only-trigger cases with real evidence (see table below).
 
-**Phase 0 acceptance — all 7 met, with evidence:**
+**Real bugs found and fixed during Phase 1** (all confirmed via a running test, not guessed):
 
-| # | Criterion | Result |
+1. `/api/v1/auth/me` was wrongly covered by the `/api/v1/auth/**` permitAll matcher →
+   unauthenticated/garbage-token requests hit the controller as Spring Security's
+   `anonymousUser` principal, and `UUID.fromString("anonymousUser")` threw, producing a **500**
+   instead of a 401. Fixed by scoping permitAll to the three genuinely public auth endpoints only.
+2. Spring Boot 4.1 auto-configures a **Jackson 3** (`tools.jackson.*`) `ObjectMapper`, not classic
+   Jackson 2. The `spring.jackson.property-naming-strategy`/`default-property-inclusion` YAML
+   properties silently had no effect on it. Fixed with an explicit `JsonMapperBuilderCustomizer`
+   bean (`config/JacksonConfig.java`) — global snake_case now verified end-to-end via `AuthFlowIT`.
+3. `*IT.java` integration tests never ran under `./mvnw test` (Surefire's naming convention
+   excludes them by design — that's Failsafe's job) — they were silently skipped with exit 0.
+   Added the `maven-failsafe-plugin` bound to `integration-test`/`verify`; `make test` now runs
+   `mvn verify` so both suites execute. Documented in `.claude/rules/testing.md` as a footgun to
+   watch for when adding new `*IT` classes.
+
+Full detail on the Spring Boot 4.1 / Jackson 3 API surface (package moves, etc.):
+`docs/OPERATIONS/LOCAL_DEV.md` § spring-api specifics.
+
+**Phase 1 acceptance — all 9 met, with evidence:**
+
+| # | Criterion | Evidence |
 |---|---|---|
-| 1 | `make up` → all healthy, none restarting | ✅ 5/5 (otel-collector: running, see note) |
-| 2 | psql connects; pgvector works | ✅ PG **16.14**, pgvector **0.8.6**, `<=>` round trip verified |
-| 3 | Kafka reachable internally + from host; kafka-ui lists broker | ✅ produce/consume round trip; cluster ONLINE |
-| 4 | Redis `PING` | ✅ PONG + set/get round trip |
-| 5 | OTel collector accepts an OTLP span | ✅ HTTP 200 and span observed in the pipeline |
-| 6 | `down` → `up` with data intact | ✅ Postgres row and Kafka topic both survived |
-| 7 | `check-prereqs.sh` fails on a missing prerequisite | ✅ `infra` exit 0, `all` exit 1 (java 8, no maven, py 3.10) |
-
-**Measured infrastructure footprint:** ~870 MiB idle (kafka 420, kafka-ui 377, otel 39,
-postgres 29, redis 5). Services and the AI image are added later; re-measure in Phase 12.
+| 1 | Register → login → JWT; `/me` resolves user | `AuthFlowIT.registerThenLogin_...` |
+| 2 | Expired/invalid/absent token → 401 standard envelope | `AuthFlowIT` (3 cases) + `JwtServiceTest` expiry/tamper cases |
+| 3 | Create workspace, add member; non-members → 404 | `WorkspaceFlowIT.createWorkspace_addMember_...`, `.nonMember_getsWorkspace_returns404` |
+| 4 | **Cross-tenant denial** (workspace B ↛ workspace A's document) | `WorkspaceFlowIT.userInWorkspaceB_cannotReadWorkspaceAsDocument_returns404` + `WorkspaceRepositoryIT` at the SQL level |
+| 5 | VIEWER cannot create a workspace (403) | `WorkspaceFlowIT.viewer_cannotCreateAWorkspace_returns403` (VIEWER token minted directly — no public endpoint produces one) |
+| 6 | Every mutation audited; audit_events is append-only | `WorkspaceFlowIT.everyMutation_writesAnAuditEvent` + `AuditEventAppendOnlyIT` (2 tests, real Postgres trigger, real Hibernate error observed) |
+| 7 | Validation failure → 400 with field details | `AuthFlowIT.register_withBlankFields_returns400WithFieldDetails` |
+| 8 | Swagger UI lists every endpoint with schemas | `SwaggerSmokeIT` (2 tests) |
+| 9 | Every response carries `request_id`; appears in logs | `AuthFlowIT.everyResponse_carriesTheSameCorrelationId...` + MDC pattern in `application.yml` |
 
 ## In progress
 
@@ -55,35 +88,36 @@ Nothing.
 
 ## Not started
 
-Phases 1–13. See `docs/IMPLEMENTATION/ROADMAP.md`.
+Phases 2–13. See `docs/IMPLEMENTATION/ROADMAP.md`.
 
 ## Blocked
 
 | Item | Blocker | Owner |
 |---|---|---|
-| **Phase 1** | **Java 8 is the default JDK and Maven is not installed.** Java 21 + Maven 3.9+ required. `make check` reproduces this. | User — `docs/OPERATIONS/LOCAL_DEV.md` §Prerequisites |
-| Phase 2 | Default Python is 3.10; 3.13.1 is installed and `uv` can pin it per-venv, so this is low-friction | User |
-| Phase 4+ | `LLM_API_KEY` (Gemini) not yet in `.env`. Phases 0–3 do not need it. | User |
+| Phase 2 | Default Python is 3.10; need 3.11+. `uv venv --python 3.13` (already installed) unblocks this — low friction. | User |
+| Phase 4+ | `LLM_API_KEY` (Gemini) not yet in `.env`. Not needed before Phase 4. | User |
 
-Phase 0 was **not** blocked by the toolchain — it needs only Docker. Phase 1 is where Java matters.
+Java/Maven blocker from Phase 0 is **resolved** — `brew install openjdk@21 maven` done, `make check`
+passes when `JAVA_HOME` is scoped to 21 (this shell's default `JAVA_HOME` still points at Corretto
+8; export it per the LOCAL_DEV.md instructions, or add it to `~/.zshrc` to make it permanent).
 
 ## Known bugs
 
-None.
+None currently open (the three found during Phase 1 are fixed — see above).
 
 ## Technical debt
 
 | Item | Cost | When to address |
 |---|---|---|
-| `otel-collector` has no container healthcheck (distroless image: no shell, so every probe fails regardless of state) | `docker compose ps` shows no health for it; verified from the host instead | Phase 8 — the real backends may ship a probe-able image |
-| `debug` exporter at `verbosity: detailed` is noisy | Log volume during development | Phase 8 replaces it with Jaeger/Tempo + Prometheus |
-| Host ports shifted off the defaults (5434/6380/29093/8091/4327-4328/13134) because another local stack (RedLine) holds 5433/6379/29092/8090/4317 | Anyone cloning must read the port table | None — documented and configurable |
+| `otel-collector` has no container healthcheck (distroless image) | Cosmetic — probed from the host instead | Phase 8 |
+| Refresh tokens are stateless JWTs with no server-side revocation list | A leaked/stolen refresh token is valid until natural expiry (7d default); acceptable for a portfolio-scale project | Revisit if a real threat model demands revocation |
+| `AuditController.forResource` is not workspace-gated (no non-document resource type exists yet to check membership against generically) | Would need re-examination once decisions/approvals land in Phase 5/7 | Phase 5–7 |
+| Document endpoints accept JSON metadata only, no file bytes | By design for Phase 1 — Phase 2 upgrades the same `POST` to multipart | Phase 2 |
 
 ## Decisions pending
 
 | Question | Needed by | Note |
 |---|---|---|
-| Exact Spring Boot version | Phase 1 | Resolve from `start.spring.io` at scaffold time. **Do not pin from memory** — the original brief cited a version that could not be verified. |
 | PDF extraction library | Phase 2 | Compare `pypdf` / `pdfplumber` / `unstructured` on the sample corpus; record in an ADR. |
 | pgvector tenant-filtering strategy | Phase 3 | Over-fetch + post-filter vs partial indexes. Measure, then record in `docs/AI/RAG.md`. |
 
@@ -91,33 +125,26 @@ None.
 
 | Suite | State |
 |---|---|
-| Stack verification | ✅ 19/19 (`make verify`) |
-| Java | No tests yet (Phase 1) |
+| Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
+| Java unit (`*Test`, Surefire) | ✅ 29/29 |
+| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 21/21 |
 | Python | No tests yet (Phase 2) |
 | Frontend | No tests yet (Phase 9) |
 | Evaluation | No dataset yet (Phase 10) |
 
-## Environment facts (verified 2026-08-09)
+## Environment facts (verified 2026-08-10)
 
 | Tool | Present | Required | OK |
 |---|---|---|---|
-| Java | 1.8.0_392 (Corretto, default); JDK 23 via Homebrew | **21 (LTS)** | ✗ |
-| Maven | not installed | 3.9+ | ✗ |
-| Python | 3.10.18 (default); 3.13.1 via Homebrew; `uv` 0.8.4 | 3.11+ | ✗ (default) |
+| Java (default, this shell) | 1.8.0_392 (Corretto) | **21 (LTS)** | ✗ — must scope `JAVA_HOME` per command or set it in `~/.zshrc` |
+| Java 21 | 21.0.12 (Homebrew) | 21 | ✓ when `JAVA_HOME` scoped |
+| Maven | 3.9.16 (Homebrew) | 3.9+ | ✓ |
+| Python | 3.10.18 default; 3.13.1 via Homebrew; `uv` 0.8.4 | 3.11+ | ✗ (default) |
 | Node | 22.13.0 | 20+ | ✓ |
-| Docker | 27.3.1 | 24+ | ✓ |
-| Docker Compose | v2.30.3 | v2 | ✓ |
-| Disk free | 317 G | ~15 G | ✓ |
+| Docker / Compose | 27.3.1 / v2.30.3 | v2 | ✓ |
 | Platform | macOS, Apple Silicon (arm64) | — | — |
 
 ## Recommended next action
 
-Install Java 21 + Maven (`brew install openjdk@21 maven`, then set `JAVA_HOME`), confirm with
-`make check`, then run `/implement-phase 1`.
-
----
-
-### How to maintain this file
-
-Update at the end of every session. Keep it under two screens. Record what is **verified**, not
-what was attempted. No chat transcripts, no narrative history — the git log covers that.
+Run `/implement-phase 2` — document ingestion. Start by benchmarking PDF extraction libraries on
+a couple of real PDFs before committing to one (Phase 2's first open decision).

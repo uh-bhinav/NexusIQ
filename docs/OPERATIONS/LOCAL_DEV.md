@@ -175,6 +175,35 @@ docker stats --no-stream                      # memory footprint
   non-default; adjust in `.env` if any of them clash.
 - Never commit `.env`.
 
+## spring-api specifics (confirmed Phase 1)
+
+- **Spring Boot 4.1.0** (not `4.1.0.RELEASE` — Boot 4.x dropped that suffix; the version string
+  from `start.spring.io`'s metadata API was stale/wrong and had to be corrected by hand against
+  Maven Central directly). Spring Framework 7.0.8, Java 21, Hibernate ORM 7.4.1.
+- **Jackson 3** (`tools.jackson.*`) is Boot 4.1's default JSON engine, not classic Jackson 2
+  (`com.fasterxml.jackson.databind`). `jackson-annotations` (`com.fasterxml.jackson.annotation`)
+  is the one module still shared between the two, which is why `JsonInclude` imports from the
+  classic package while everything else uses `tools.jackson`.
+  The classic `spring.jackson.property-naming-strategy` / `default-property-inclusion` YAML
+  properties have **no effect** on this mapper (confirmed empirically — response stayed camelCase,
+  null fields were not omitted). Global config goes through a `JsonMapperBuilderCustomizer` bean
+  instead — see `config/JacksonConfig.java`.
+- Several familiar Boot packages moved with the new granular starter split:
+  `AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`,
+  `DataJpaTest` → `org.springframework.boot.data.jpa.test.autoconfigure`. Starters split too:
+  `spring-boot-starter-webmvc` (not `-web`), separate `-test` starters per module
+  (`spring-boot-starter-webmvc-test`, `-data-jpa-test`, etc.) instead of one combined
+  `spring-boot-starter-test`.
+- Testcontainers is on **2.0.5**; `PostgreSQLContainer` moved to
+  `org.testcontainers.postgresql` (not `org.testcontainers.containers`). The shared
+  `TestcontainersConfiguration` (in `src/test/java/com/nexusiq/`, must stay `public`) points it at
+  `pgvector/pgvector:pg16` — the default `postgres:latest` doesn't have the `vector` extension
+  that `V1__enable_extensions.sql` requires.
+- **`*Test.java` vs `*IT.java` matters.** Surefire (`./mvnw test`) only runs `*Test`; Failsafe
+  (`./mvnw verify`) runs `*IT`. `make test` runs `verify` so both execute — see
+  `.claude/rules/testing.md`.
+- `JsonNode.asText()` is deprecated in Jackson 3; use `asString()`.
+
 ## Troubleshooting
 
 Runbook: `docs/OPERATIONS/RUNBOOK.md`.

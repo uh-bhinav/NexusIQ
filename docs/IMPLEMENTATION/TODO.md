@@ -7,14 +7,12 @@ Delete completed items once their phase closes — this is a working list, not a
 
 ---
 
-## Now — unblock Phase 1
+## Now — unblock Phase 2
 
-- [!] Install **Java 21 (LTS)** and make it the active JDK
-      → `brew install openjdk@21`, symlink into `/Library/Java/JavaVirtualMachines/`, set
-      `JAVA_HOME` in `~/.zshrc`. Verify with `make check`.
-- [!] Install **Maven 3.9+** → `brew install maven`. `make check` must report Maven on Java 21.
-- [ ] Point the ai-service venv at Python 3.13 (`cd ai-service && uv venv --python 3.13`) — Phase 2.
+- [ ] Point the ai-service venv at Python 3.13 (`cd ai-service && uv venv --python 3.13`).
 - [ ] Obtain a **Gemini API key** → `LLM_API_KEY` in `.env`. Not needed until Phase 4.
+- [ ] Optionally add `export JAVA_HOME=$(/usr/libexec/java_home -v 21)` to `~/.zshrc` so it's
+      not needed per-command (Java 21 + Maven are installed; only the shell default is stale).
 
 ## Phase 0 — Repository & environment ✅ COMPLETE (2026-08-09)
 
@@ -29,19 +27,25 @@ Delete completed items once their phase closes — this is a working list, not a
 - [x] `docs/OPERATIONS/LOCAL_DEV.md` completed with verified versions and ports
 - [x] All 7 acceptance criteria verified with recorded evidence → `STATUS.md`
 
-## Phase 1 — Java backend foundation
+## Phase 1 — Java backend foundation ✅ COMPLETE (2026-08-10)
 
-- [ ] Scaffold from `start.spring.io`; **record the chosen Spring Boot version** in LOCAL_DEV.md
-- [ ] Commit the Maven wrapper
-- [ ] Flyway V1 (extensions) → V4 (users, workspaces+members, documents, audit_events + trigger)
-- [ ] JWT auth (access + refresh), BCrypt, role model
-- [ ] `WorkspaceAccessService`; tenant filtering **in SQL** on every scoped query
-- [ ] Auth / workspace / document-metadata / audit endpoints
-- [ ] Global exception handler + standard error envelope
-- [ ] Correlation-id filter + structured JSON logging
-- [ ] Actuator + OpenAPI/Swagger
-- [ ] Tests incl. the cross-tenant denial test
-- [ ] Verify all 9 acceptance criteria
+- [x] Scaffold from the live Initializr API; Spring Boot **4.1.0** confirmed against Maven
+      Central (not `.RELEASE` — recorded in LOCAL_DEV.md)
+- [x] Commit the Maven wrapper
+- [x] Flyway V1 (extensions) → V4 (users, workspaces+members, documents+knowledge_sources,
+      audit_events + append-only trigger)
+- [x] JWT auth (access + refresh), BCrypt-12, role model, timing-safe login
+- [x] `WorkspaceAccessService`; tenant filtering **in SQL** on every scoped query
+- [x] Auth / workspace / document-metadata / audit endpoints
+- [x] Global exception handler + standard error envelope
+- [x] Correlation-id filter + structured JSON logging (MDC)
+- [x] Actuator + OpenAPI/Swagger (springdoc 3.1.0 — the Framework-7 compatible line)
+- [x] `JsonMapperBuilderCustomizer` for global snake_case (Jackson 3 needs this, not the
+      classic `spring.jackson.*` YAML properties — see LOCAL_DEV.md)
+- [x] `maven-failsafe-plugin` wired so `*IT` tests actually run (`mvn verify`, not `mvn test`)
+- [x] 50 tests (29 unit + 21 integration) incl. the cross-tenant denial test at both the HTTP
+      and repository level, and the audit append-only trigger proven against real Postgres
+- [x] Verified all 9 acceptance criteria with evidence — see `STATUS.md`
 
 ## Phase 2 — Document ingestion
 

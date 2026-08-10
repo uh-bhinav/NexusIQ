@@ -106,12 +106,15 @@ seed: ## Load the sample enterprise corpus (Phase 2)
 demo: ## One-command demo bootstrap (Phase 12)
 	@echo -e "$(Y)Not available yet — arrives in Phase 12.$(N)"
 
-test: ## Run all test suites
+test: ## Run all test suites (Java: *Test via Surefire + *IT via Failsafe, i.e. `mvn verify`)
 	@ran=0; \
-	if [ -f backend/spring-api/pom.xml ]; then (cd backend/spring-api && ./mvnw test) || exit 1; ran=1; fi; \
+	if [ -f backend/spring-api/pom.xml ]; then (cd backend/spring-api && ./mvnw verify) || exit 1; ran=1; fi; \
 	if [ -f ai-service/pyproject.toml ]; then (cd ai-service && uv run pytest) || exit 1; ran=1; fi; \
 	if [ -f frontend/web/package.json ]; then (cd frontend/web && npm test) || exit 1; ran=1; fi; \
 	[ $$ran -eq 1 ] || echo -e "$(Y)No test suites exist yet — services arrive in Phases 1-2.$(N)"
+
+test-unit: ## Java unit tests only (fast, no Docker) — *Test classes via Surefire
+	@cd backend/spring-api && ./mvnw test
 
 lint: ## Run all linters
 	@ran=0; \
