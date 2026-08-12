@@ -1,0 +1,16 @@
+[project]
+name = "nexusiq-e2e"
+version = "0.1.0"
+description = "Cross-service E2E test: the full spine (upload -> ingest -> decide -> validate -> escalate -> approve -> audit)"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.uv]
+package = false

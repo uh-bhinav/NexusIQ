@@ -1,0 +1,14 @@
+{
+  "risk_level": "HIGH",
+  "factors": [
+    {
+      "category": "SECURITY",
+      "description": "Fixture rigged for tests/e2e/test_full_spine.py: forces ApprovalGate's risk>=threshold trigger so the full spine's escalate/approve branch is deterministically exercised, independent of retrieved document content.",
+      "severity": "HIGH",
+      "likelihood": "POSSIBLE",
+      "evidence_ids": ["E1"]
+    }
+  ],
+  "missing_information": [],
+  "confidence": 0.8
+}

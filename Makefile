@@ -18,7 +18,7 @@ D := \033[2m
 N := \033[0m
 
 .PHONY: help setup env check up down restart clean logs ps verify \
-        psql redis-cli topics migrate seed demo test lint eval
+        psql redis-cli topics migrate seed demo test test-unit test-e2e lint eval
 
 help: ## Show this help
 	@echo ""
@@ -115,6 +115,16 @@ test: ## Run all test suites (Java: *Test via Surefire + *IT via Failsafe, i.e. 
 
 test-unit: ## Java unit tests only (fast, no Docker) — *Test classes via Surefire
 	@cd backend/spring-api && ./mvnw test
+
+test-e2e: ## Cross-service E2E spine test (Phase 10) — requires spring-api + ai-service already running, see docs/OPERATIONS/LOCAL_DEV.md "E2E testing"
+	@if ! curl -sf http://localhost:8180/actuator/health >/dev/null 2>&1 || ! curl -sf http://localhost:8000/ready >/dev/null 2>&1; then \
+		echo -e "$(R)spring-api (localhost:8180) and/or ai-service (localhost:8000) are not reachable.$(N)"; \
+		echo -e "$(Y)This suite drives two already-running processes rather than starting them itself$(N)"; \
+		echo -e "$(Y)(unlike 'make test', which is fully Testcontainers-managed). See docs/OPERATIONS/$(N)"; \
+		echo -e "$(Y)LOCAL_DEV.md's 'E2E testing' section for the exact startup commands.$(N)"; \
+		exit 1; \
+	fi
+	@cd tests/e2e && uv run pytest -v
 
 lint: ## Run all linters
 	@ran=0; \

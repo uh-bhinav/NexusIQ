@@ -24,7 +24,10 @@ def get_model_provider(settings: Settings) -> ModelProvider:
                 "the mock LLM provider is test-only and unreachable outside local/ci "
                 f"(NEXUSIQ_ENV={settings.nexusiq_env!r})"
             )
-        return MockProvider(_MOCK_FIXTURES_DIR)
+        fixtures_dir = (
+            Path(settings.mock_fixtures_dir) if settings.mock_fixtures_dir else _MOCK_FIXTURES_DIR
+        )
+        return MockProvider(fixtures_dir)
     raise NotImplementedError(
         f"LLM_PROVIDER={settings.llm_provider!r} is not implemented (only gemini, mock)"
     )

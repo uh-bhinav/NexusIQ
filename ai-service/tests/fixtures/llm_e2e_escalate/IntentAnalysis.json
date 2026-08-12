@@ -1,0 +1,9 @@
+{
+  "decision_type": "vendor_approval",
+  "entities": ["Vendor Alpha"],
+  "jurisdiction": "EU",
+  "environment": "production",
+  "required_domains": ["security", "data_residency", "procurement"],
+  "missing_information": [],
+  "confidence": 0.92
+}

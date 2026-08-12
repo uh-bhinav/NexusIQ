@@ -1,0 +1,9 @@
+{
+  "recommendation": "APPROVE",
+  "reasoning_summary": "Data residency policy requirements are satisfied, but the risk assessment flags a HIGH-severity concern requiring human review before approval.",
+  "confidence": 0.82,
+  "key_evidence_ids": [],
+  "required_actions": [],
+  "conditions": [],
+  "unresolved_questions": []
+}

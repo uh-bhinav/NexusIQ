@@ -170,6 +170,50 @@ files spring-api wrote — a relative default would silently point them at two d
 directories (backend/spring-api/ vs ai-service/), which is why both now default to the same
 absolute path in code.
 
+## E2E testing
+
+`tests/e2e/` (Phase 10) is the one cross-service test proving the full spine — upload → ingest →
+decide → validate → escalate → approve → audit — end to end through real spring-api and ai-service
+processes, not Testcontainers. Unlike `make test`, it doesn't start its own dependencies: start
+both services by hand first, exactly like the development loop above but with two differences that
+matter for reaching the escalate/approve branch deterministically:
+
+```bash
+docker compose up -d postgres redis kafka otel-collector
+
+# spring-api — 8180, not 8080 (avoids colliding with anything else already using 8080)
+cd backend/spring-api
+API_PORT=8180 POSTGRES_HOST=localhost POSTGRES_PORT=5434 \
+  KAFKA_BOOTSTRAP_SERVERS=localhost:29093 REDIS_HOST=localhost REDIS_PORT=6380 \
+  AI_SERVICE_BASE_URL=http://localhost:8000 STORAGE_LOCAL_PATH=/tmp/nexusiq-documents \
+  ./mvnw spring-boot:run
+
+# ai-service — mock provider, but pointed at the escalation fixture set, not the default one.
+# The default tests/fixtures/llm/ set always cleanly APPROVEs (confirmed empirically); the E2E
+# test needs the human-approval branch to actually fire, so it requires
+# tests/fixtures/llm_e2e_escalate/ instead (RiskAssessment.json there returns risk_level=HIGH,
+# which deterministically trips ApprovalGate's risk>=threshold trigger regardless of what the
+# uploaded document says).
+cd ai-service
+LLM_PROVIDER=mock NEXUSIQ_ENV=local \
+  MOCK_FIXTURES_DIR="$(pwd)/tests/fixtures/llm_e2e_escalate" \
+  POSTGRES_HOST=localhost POSTGRES_PORT=5434 KAFKA_BOOTSTRAP_SERVERS=localhost:29093 \
+  REDIS_HOST=localhost REDIS_PORT=6380 STORAGE_LOCAL_PATH=/tmp/nexusiq-documents \
+  uv run uvicorn app.main:app --port 8000
+
+# then, from the repo root:
+make test-e2e
+```
+
+`make test-e2e` checks both services are reachable first and fails with a clear message (not a
+confusing test failure) if either isn't up. `tests/e2e/conftest.py` does the same at the pytest
+level via a session-scoped skip. Override `E2E_API_BASE_URL` / `E2E_AI_SERVICE_HEALTH_URL` if your
+local ports differ from the defaults above.
+
+This suite is intentionally not part of `make test` (which is fully Testcontainers-managed and
+requires nothing pre-running) — see `docs/TESTING/STRATEGY.md`'s "few E2E tests" guidance and
+`tests/e2e/test_full_spine.py`'s module docstring for the full rationale.
+
 ## Useful commands
 
 ```bash

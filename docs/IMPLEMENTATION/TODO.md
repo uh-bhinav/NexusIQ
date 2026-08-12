@@ -19,15 +19,20 @@ the full history (kept there per this file's own "delete completed items" conven
       documents, #3 two policy versions, #6 LLM timeout retry, #9 Kafka consumer failure×3→DLQ,
       #14 Redis unavailable). #2 surfaced and fixed a genuine full-stack bug: `CONFLICTING_EVIDENCE`
       was missing from the `recommendation` enum in Python/Java/DB/frontend. See STATUS.md's
-      Phase 10 entry for the full detail. **Not yet committed.**
+      Phase 10 entry for the full detail. **Committed as `a90b626`.**
 - [x] Rebuilt `docs/sample-enterprise/` to the full 10-document, 7-subdirectory corpus per
       `docs/PROJECT_SPEC.md` §9 — unblocks the evaluation dataset below and spec §8 step 7's
-      `UNKNOWN` case. **Not yet committed.**
+      `UNKNOWN` case. **Committed as `a90b626`.**
 - [x] `ApprovalGateTest.java` — this deterministic gate had zero direct unit tests; now has 9,
-      covering all 7 triggers. **Not yet committed.**
+      covering all 7 triggers. **Committed as `a90b626`.**
+- [x] E2E test: upload → ingest → decide → validate → escalate → approve → audit.
+      `tests/e2e/test_full_spine.py`, driven against real spring-api + ai-service processes (not
+      Testcontainers — see its module docstring). Required a small `MOCK_FIXTURES_DIR` setting +
+      a dedicated `llm_e2e_escalate` fixture set so the escalate/approve branch is reachable
+      deterministically (the default mock fixtures always cleanly auto-approve). `make test-e2e`
+      added. See STATUS.md's Phase 10 entry for the full detail. **Not yet committed.**
 - [ ] Close remaining coverage gaps in all three services (Java/Python/frontend) — identify what's
       genuinely untested first, don't pad numbers.
-- [ ] E2E test: upload → ingest → decide → validate → escalate → approve → audit.
 - [ ] Evaluation harness + ≥30 labelled cases in `ai-service/evaluation/datasets/` (clean approval,
       conditional approval, rejection, unknown, conflicting versions, no evidence, injection,
       out-of-scope) — corpus is now ready (see above); this is also where spec §8 step 7 (data

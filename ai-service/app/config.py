@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     # tier (cheaper than the newer gemini-3.5-flash at $0.30/$2.50 vs
     # $1.50/$9.00 per 1M tokens). See llm/pricing.py for the full table. ---
     llm_provider: str = "gemini"
+    # Overrides MockProvider's fixture directory (default: tests/fixtures/llm,
+    # relative to the ai-service package) when llm_provider="mock". Empty
+    # string means "use the default" — this only exists so a dedicated fixture
+    # set (e.g. tests/fixtures/llm_e2e_escalate) can be selected without code
+    # changes, for the top-level tests/e2e suite. Never used when
+    # llm_provider="gemini".
+    mock_fixtures_dir: str = ""
     llm_model: str = "gemini-2.5-flash"
     # gemini-2.5-pro was pinned at Phase 4 scaffold time per start.spring.io-style live
     # verification, but Google retired it for this API key/project ("no longer available

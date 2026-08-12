@@ -1,0 +1,26 @@
+{
+  "tasks": [
+    {
+      "domain": "security",
+      "query": "EU data residency requirements for production vendor systems",
+      "document_types": ["SECURITY_POLICY"],
+      "rationale": "The question asks about EU production approval, which requires checking data residency policy.",
+      "priority": "CRITICAL"
+    },
+    {
+      "domain": "data_residency",
+      "query": "data residency and EU/EEA storage requirements",
+      "document_types": ["SECURITY_POLICY"],
+      "rationale": "EU production approval requires confirming where vendor data is stored and processed.",
+      "priority": "CRITICAL"
+    },
+    {
+      "domain": "procurement",
+      "query": "vendor procurement pre-approval checklist requirements",
+      "document_types": ["PROCUREMENT_POLICY"],
+      "rationale": "Vendor approvals require checking procurement's own pre-approval requirements.",
+      "priority": "IMPORTANT"
+    }
+  ],
+  "historical_lookup": false
+}

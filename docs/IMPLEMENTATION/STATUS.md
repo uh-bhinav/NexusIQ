@@ -6,30 +6,41 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 10 in progress.** Audited all 14 named failure-scenario
-tests from `.claude/rules/testing.md`: 9 were already covered, 5 were gaps (#2 contradictory
-documents, #3 two policy versions, #6 LLM timeout retry, #9 Kafka consumer failure×3→DLQ, #14 Redis
-unavailable) — all 5 now closed. Closing #2 surfaced a real, previously-undetected bug: the
-`recommendation` enum was missing `CONFLICTING_EVIDENCE` entirely across Python/Java/the DB/the
-frontend, directly violating `.claude/rules/ai-service.md`'s "enums must include the honest
-options" mandate — there was no valid way for the system to express "these two policies genuinely
-disagree." Fixed full-stack: Python `Recommendation` schema + `decision_v1.md` prompt guidance +
-`approval_router_node`'s new 7th (unconditional) escalation trigger; Java `RecommendationType` enum
-+ `ApprovalGate`'s mirrored 7th trigger + a new `V10` migration widening the `decisions` CHECK
-constraint (V8 is immutable once shipped, per `.claude/rules/database.md`); frontend
-`RecommendationType` Zod schema. Also wrote `ApprovalGateTest.java` — this deterministic gate,
-exactly the kind of logic `.claude/rules/testing.md` prioritizes for heavy unit testing, previously
-had zero direct unit tests (only indirect coverage via 2 ITs); it now has 9, one per trigger plus a
-clean-payload negative case and an `INSUFFICIENT_INFORMATION`-doesn't-alone-escalate case proving
-the asymmetry with `CONFLICTING_EVIDENCE` is deliberate. Also rebuilt `docs/sample-enterprise/`
-from 4 starter documents to the full 10-document, 7-subdirectory corpus specified in
-`docs/PROJECT_SPEC.md` §9 (genuinely conflicting policy versions, an `UNKNOWN`-case vendor doc, a
-clean approval case, a historical rejection, an incident report, an injection attempt) — this
-unblocks both the scenario #2/#3 tests and the not-yet-started evaluation harness. V10 applied and
-verified against the live local Postgres (`\d decisions` confirms the widened constraint).
-`./mvnw verify` → 72 unit + 34 integration passed (0 failures/errors). `pytest` → 189/189 passed.
-`tsc --noEmit`/Vitest clean (44/44 frontend tests). All work in this entry is implemented and
-verified but **not yet committed** — see "Recommended next action".
+**Last verified:** 2026-08-12 — **Phase 10 in progress.** Two pieces landed this session.
+
+(1) Audited all 14 named failure-scenario tests from `.claude/rules/testing.md`: 9 were already
+covered, 5 were gaps (#2 contradictory documents, #3 two policy versions, #6 LLM timeout retry, #9
+Kafka consumer failure×3→DLQ, #14 Redis unavailable) — all 5 now closed. Closing #2 surfaced a real,
+previously-undetected bug: the `recommendation` enum was missing `CONFLICTING_EVIDENCE` entirely
+across Python/Java/the DB/the frontend, directly violating `.claude/rules/ai-service.md`'s "enums
+must include the honest options" mandate. Fixed full-stack (Python schema + prompt +
+`approval_router_node`'s new 7th trigger; Java enum + `ApprovalGate`'s mirrored 7th trigger + `V10`
+migration widening the `decisions` CHECK constraint; frontend Zod schema); V10 applied and verified
+against the live local Postgres. Also wrote `ApprovalGateTest.java` (9 tests, all 7 triggers — this
+deterministic gate had zero direct unit tests before). Also rebuilt `docs/sample-enterprise/` to the
+full 10-document, 7-subdirectory corpus per `docs/PROJECT_SPEC.md` §9. **Committed as `a90b626`.**
+
+(2) Built the Phase 10 E2E test: `tests/e2e/test_full_spine.py`, the one test proving the entire
+spec end to end — upload → ingest → decide → validate → escalate → approve → audit — through real,
+already-running spring-api and ai-service processes (not Testcontainers; see its module docstring
+for why). Building it live-verified the real REST contract in several places docs/schemas didn't
+quite match (multipart `metadata` part needs an explicit `application/json` Content-Type or Spring
+silently 500s; `POST .../decisions` returns `202` not `201`; `GET /audit`'s `workspaceId` query
+param is camelCase even though every JSON body field is snake_case). Also discovered the mock LLM
+provider's default fixtures always yield a clean, fully-grounded `APPROVE` (evidence-ID remapping
+in the context builder makes the fixture's placeholder `"E1"` resolve to whatever chunk actually
+retrieved best, giving `evidence_coverage: 1.0` regardless of document relevance) — so the
+escalate/approve branch can never be reached against the default fixture set. Added a small,
+explicitly-named `MOCK_FIXTURES_DIR` setting (`ai-service/app/config.py` + `llm/factory.py`,
+default-preserving, `mypy --strict`/`ruff` clean) and a dedicated
+`tests/fixtures/llm_e2e_escalate/` fixture set (`RiskAssessment.json` returns `risk_level: HIGH`)
+so the E2E test can deterministically exercise the human-approval branch without depending on real
+document content. `make test-e2e` added (checks both services are reachable first, clear message if
+not — this suite is deliberately not part of `make test`, which is fully hermetic/Testcontainers-
+managed and requires nothing pre-running; see `docs/TESTING/STRATEGY.md`'s "few E2E tests"
+guidance). Live-run twice for repeatability, confirmed passing both times; full `pytest` (189/189,
+unaffected by the config change) rerun afterward as a regression check. **Implemented and verified
+but not yet committed** — see "Recommended next action".
 
 ## Current position
 
@@ -925,12 +936,67 @@ Verification: `./mvnw verify` → 72 unit (+9 `ApprovalGateTest`) + 34 integrati
 failures/errors. `pytest` → 189/189 passed (+9: 1 Redis, 5 Gemini retry, 1 Kafka DLQ, 1 context
 versioning, 1 conflicting-evidence routing). `tsc --noEmit`/Vitest clean, 44/44 frontend tests.
 
-Not yet done this phase: the E2E test spanning the full spine (upload→ingest→decide→validate→
-escalate→approve→audit — confirmed via an earlier audit that no such cross-service test currently
-exists), the evaluation harness itself (retrieval recall@k/precision@k/MRR, generation groundedness/
-citation validity, decision accuracy — `docs/AI/EVALUATION.md`), ≥30 labelled cases, a baseline
-report, and an A/B model comparison. All of this phase's work described above is implemented and
-verified but **not yet committed to git**.
+**E2E test (added after the above, same phase).** `tests/e2e/test_full_spine.py` — the single
+cross-service test proving the full spine end to end against real, already-running spring-api and
+ai-service processes:
+
+1. Registers two users (a requester and a separate approver — `ApprovalGate`'s separation-of-duties
+   rule forbids a requester approving their own decision).
+2. Requester creates a workspace (becomes its `ADMIN` member) and adds the approver as `APPROVER`.
+3. Uploads `docs/sample-enterprise/security/security-policy-v2.md`, polls until `READY`, asserts
+   `chunk_count > 0` — proves real extraction/chunking/embedding, not a stub.
+4. Creates a decision request, polls until terminal, asserts `WAITING_FOR_APPROVAL` with
+   `escalation_reasons` containing `risk_level=HIGH` — proves the request was actually consumed off
+   Kafka and run through all seven LangGraph nodes, and that `ApprovalGate`'s deterministic
+   threshold gate (not the LLM) decided to escalate.
+5. Approver lists `/approvals`, finds the matching one, approves it with notes.
+6. Polls the decision back to `APPROVED` / `outcome.final_status == "HUMAN_APPROVED"`.
+7. Fetches `/audit?workspaceId=...` and asserts all six expected event types are present
+   (`WORKSPACE_CREATED`, `WORKSPACE_MEMBER_ADDED`, `DOCUMENT_UPLOADED`, `DOCUMENT_READY`,
+   `DECISION_REQUESTED`, `APPROVAL_GRANTED`).
+
+Building this live-verified several real REST-contract facts that weren't obvious from
+`API_DESIGN.md` alone: the multipart `metadata` part needs an explicit `application/json`
+Content-Type on its own (a plain form field silently 500s — Spring's `@RequestPart` message
+converter selection depends on it); `POST .../decisions` returns `202`, not `201` (long-running
+work, per `.claude/rules/backend-java.md`); `GET /audit`'s `workspaceId` query parameter is
+camelCase even though every JSON body field elsewhere is snake_case (`@RequestParam` binds the Java
+parameter name literally — the snake_case Jackson naming strategy only applies to request/response
+bodies).
+
+A more fundamental discovery: the mock LLM provider's default fixture set
+(`ai-service/tests/fixtures/llm/`) can never reach the escalate/approve branch. Its
+`PolicyAnalysisOutput`/`RiskAssessment` fixtures always yield a clean, low-risk `APPROVE`, and the
+context builder remaps the fixture's placeholder evidence id `"E1"` to whichever real chunk was
+actually retrieved — so `evidence_coverage` comes out `1.0` regardless of the uploaded document's
+actual relevance. Confirmed empirically (a first E2E run against the default fixtures went straight
+to `AUTO_APPROVED`). Fixed with the smallest change that preserves every existing test's behavior:
+`Settings.mock_fixtures_dir` (new, empty-string default = current hardcoded path, `mypy --strict`/
+`ruff` clean) lets `llm/factory.py` point `MockProvider` at an alternate fixture directory via env,
+and `tests/fixtures/llm_e2e_escalate/` is a dedicated copy of the default set with only
+`RiskAssessment.json` changed (`risk_level: "HIGH"`, with an honest comment explaining it's rigged
+for this test) — deterministically trips `ApprovalGate`'s risk≥threshold trigger independent of
+document content. Documented as a required precondition in the test's own module docstring,
+`docs/OPERATIONS/LOCAL_DEV.md`'s new "E2E testing" section, and enforced by name in the test's own
+failure message if a run reaches `APPROVED` instead of `WAITING_FOR_APPROVAL`.
+
+`make test-e2e` added: checks both services are reachable first (clear message, not a confusing
+failure, if not) then runs `cd tests/e2e && uv run pytest -v`. `tests/e2e/conftest.py`'s
+session-scoped fixture does the same skip at the pytest level. Deliberately **not** folded into
+`make test` — that target is fully Testcontainers-managed and requires nothing pre-running;
+`docs/TESTING/STRATEGY.md`'s "few E2E tests" tier is structurally different, and bundling it in
+would make `make test` depend on manually-started host processes for no benefit in CI. Ran twice
+back to back to confirm repeatability (unique emails/workspace names per run) — both passed. Full
+`ai-service` `pytest` suite (189/189) and `ruff`/`mypy --strict` rerun afterward as a regression
+check on the `config.py`/`factory.py` change — unaffected, since the new setting's default preserves
+the exact prior behavior.
+
+Not yet done this phase: the evaluation harness itself (retrieval recall@k/precision@k/MRR,
+generation groundedness/citation validity, decision accuracy — `docs/AI/EVALUATION.md`), ≥30
+labelled cases, a baseline report, and an A/B model comparison. All of this phase's work described
+above (both the failure-scenario-gap work, already committed as `a90b626`, and the E2E test) is
+implemented and verified; the E2E test itself is **not yet committed** — see "Recommended next
+action".
 
 **Phase 9 — Frontend (2026-08-11 to 2026-08-12, COMPLETE).**
 
@@ -1422,6 +1488,7 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
 | Frontend (`vitest`, RTL + MSW) | ✅ 44/44 |
 | Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
+| E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
 | Evaluation | No dataset yet — corpus now ready (10 docs, Phase 10 remaining work) |
 
 ## Environment facts (verified 2026-08-10)
@@ -1444,13 +1511,12 @@ other stack is running.
 
 Continue Phase 10. Concretely, in roughly this order:
 
-1. **Commit this phase's work** (currently implemented and fully verified, but uncommitted — see
-   the Phase 10 entry above): the 5 failure-scenario-gap tests, the full-stack `CONFLICTING_EVIDENCE`
-   fix (Python/Java/`V10` migration/frontend), `ApprovalGateTest.java`, and the rebuilt
-   `docs/sample-enterprise/` corpus.
-2. **The E2E test** — upload→ingest→decide→validate→escalate→approve→audit, spanning all three
-   services. Confirmed via an earlier audit that nothing like this currently exists.
-3. **The evaluation harness** (`docs/AI/EVALUATION.md`): ≥30 labelled cases (the corpus rebuilt this
+1. **Commit the E2E test** (currently implemented and verified, but uncommitted — see the Phase 10
+   entry above): `tests/e2e/`, the `MOCK_FIXTURES_DIR` setting (`ai-service/app/config.py` +
+   `llm/factory.py`), `ai-service/tests/fixtures/llm_e2e_escalate/`, the `make test-e2e` target, and
+   `docs/OPERATIONS/LOCAL_DEV.md`'s new "E2E testing" section. (The failure-scenario-gap work and
+   `CONFLICTING_EVIDENCE` fix from earlier in this phase are already committed as `a90b626`.)
+2. **The evaluation harness** (`docs/AI/EVALUATION.md`): ≥30 labelled cases (the corpus rebuilt this
    phase should make this concrete rather than synthetic), retrieval metrics (recall@5, recall@10,
    precision@5, MRR), generation metrics (groundedness, citation validity, hallucination rate),
    decision metrics (recommendation accuracy, policy-status accuracy, escalation precision/recall),
