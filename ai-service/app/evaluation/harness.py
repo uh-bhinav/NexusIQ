@@ -49,9 +49,11 @@ def load_cases(case_id: str | None = None) -> list[EvalCase]:
     raw = json.loads(_DATASET_PATH.read_text())
     cases = [EvalCase.model_validate(c) for c in raw]
     if case_id:
-        cases = [c for c in cases if c.id == case_id]
-        if not cases:
-            raise ValueError(f"No case with id {case_id!r} in {_DATASET_PATH}")
+        wanted = {c.strip() for c in case_id.split(",")}
+        cases = [c for c in cases if c.id in wanted]
+        missing = wanted - {c.id for c in cases}
+        if missing:
+            raise ValueError(f"No case(s) {sorted(missing)!r} in {_DATASET_PATH}")
     return cases
 
 
@@ -222,7 +224,11 @@ def _save_results(run_result: EvalRun, provider: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="NexusIQ AI evaluation harness")
     parser.add_argument("--provider", default=None, help="Override LLM_PROVIDER (mock|gemini)")
-    parser.add_argument("--case", default=None, help="Run a single case by id (e.g. EVAL-007)")
+    parser.add_argument(
+        "--case",
+        default=None,
+        help="Run one or more case ids, comma-separated (e.g. EVAL-007,EVAL-013)",
+    )
     args = parser.parse_args()
 
     run_result = asyncio.run(run(provider=args.provider, case_id=args.case))
