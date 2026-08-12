@@ -6,8 +6,8 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 10 substantially complete; Phase 11 starting next, per
-explicit user instruction to proceed past the one item still blocked.** Five pieces landed this
+**Last verified:** 2026-08-12 — **Phase 10 substantially complete (2 items deferred, see below);
+Phase 11 (CI/CD) in progress.** Five Phase 10 pieces landed this
 session.
 
 (1) Audited all 14 named failure-scenario tests from `.claude/rules/testing.md`: 9 were already
@@ -187,14 +187,92 @@ baseline and the A/B model comparison (both blocked on today's free-tier quota r
 piece (3) above). Everything else in Phase 10's roadmap deliverables is done. Moving on to Phase 11
 now rather than waiting on the quota.
 
+**Phase 11 — CI/CD (2026-08-12, IN PROGRESS).** Per explicit user instruction to proceed through
+Phase 11 and Phase 12, with Phase 13 (Kubernetes) explicitly out of scope.
+
+Fixed one real, previously-undetected gap while building this: `frontend/web/package.json` had no
+`test` script at all, despite the Makefile's `test` target calling `npm test` — meaning `make test`
+had been silently unable to run the frontend suite this entire project. Added
+`"test": "vitest run"`; confirmed `npm test` now runs all 49 tests correctly.
+
+Built a functional multi-stage `Dockerfile` for each of the three services — none existed before
+this session. `backend/spring-api/Dockerfile`: `eclipse-temurin:21-jdk` build stage → `21-jre-alpine`
+runtime, non-root user. `ai-service/Dockerfile`: `python:3.13-slim` + `uv` build stage → slim runtime,
+non-root user. `frontend/web/Dockerfile`: `node:22-alpine` build stage → `nginx:1.29-alpine` serving
+the static bundle, with `nginx.conf.template` (envsubst-rendered at container start) handling SPA
+routing (`try_files ... /index.html`) and reverse-proxying `/api/` to spring-api, mirroring
+`vite.config.ts`'s dev-server proxy so the browser never needs CORS config in production either. New
+runtime config `API_PROXY_TARGET` documented in `.env.example`. `.dockerignore` added per service
+(excludes `.env`/`.env.*`, build artifacts, caches). All three images build successfully — spring-api
+(468MB) and frontend (93MB) confirmed via multiple successful local builds this session; ai-service
+confirmed via two independent successful builds earlier in this session (image run and inspected
+directly — `docker run`, `docker history`, `du` — to verify internals), though a fresh rebuild late in
+the session repeatedly hit Docker Desktop's own disk-space ceiling from this session's cumulative
+testing (`no space left on device` during image export, not a Dockerfile defect — confirmed via
+`docker system df`/`docker buildx du` showing real, growing build-cache usage right up to the
+failure, not a hang). Per explicit instruction, not retried a fourth time; Docker's build cache and
+dangling images pruned afterward to leave the environment clean.
+
+**Known, deliberately deferred to Phase 12** (its own explicit acceptance criteria: "non-root, slim,
+healthchecked"): the `ai-service` image is large (~8.4GB) because `torch` — a transitive dependency
+of `sentence-transformers`, needed only for local CPU embedding inference — resolves to a
+CUDA-bundled wheel with ~3GB of `nvidia`/`triton` packages this project never uses (no GPU story
+anywhere in `.claude/rules/ai-service.md`). Tried pinning `torch` to the official CPU-only wheel
+index via `[tool.uv.sources]` in `pyproject.toml`; confirmed via `uv lock -v` that `uv` (0.8.4) still
+resolved `torch`'s metadata from the default PyPI index regardless of the pin — a real, reproducible
+uv behavior with this exact transitive-dependency-pinning scenario, not a mistake on the first try.
+Reverted cleanly (`pyproject.toml`/`uv.lock` back to their prior, already-tested state — confirmed
+via `git diff` showing zero change) rather than ship unused config or keep chasing a Phase 12-scoped
+problem inside Phase 11. Documented directly in the Dockerfile's own comment for whoever picks this
+up in Phase 12.
+
+Built `.github/workflows/ci.yml` — the actual Phase 11 deliverable. Structure:
+- `changes` — `dorny/paths-filter` gates every other job on whether `backend/spring-api/**`,
+  `ai-service/**`, `frontend/web/**`, or shared root files (`docker-compose.yml`, `.env.example`,
+  the workflow file itself) changed, so a single-service change doesn't pay for the other two.
+- `backend-unit` → `backend-integration` — Surefire then Failsafe+Testcontainers (the runner's
+  pre-installed Docker manages its own ephemeral Postgres/Kafka; no shared infra needed).
+- `ai-service-test` — starts Postgres/Redis/Kafka from the same `docker-compose.yml` local dev
+  already uses (not a duplicated service definition), applies Flyway migrations (Java owns the
+  schema even for ai-service's tests), then `ruff`/`mypy`/`pytest` with `LLM_PROVIDER=mock`.
+- `frontend-test` — `tsc --noEmit`, `oxlint`, `vitest run`, `vite build`.
+- `evaluate` — Phase 10's harness against the mock provider only (`docs/AI/EVALUATION.md`: CI uses
+  mock so results are deterministic and free; real-provider baselines are run locally/manually,
+  matching this session's own experience hitting a real quota wall). Proves the harness itself still
+  runs end to end on every relevant change — not a quality gate.
+- `docker-build` — matrix over all three services, `docker/build-push-action` with `push: false`
+  (no registry configured — `$0 recurring infrastructure`, CLAUDE.md non-negotiable #11), images
+  exported to a tarball artifact for the scan job to load.
+- `dependency-scan` — `pip-audit` (ai-service), `npm audit` (frontend), OWASP `dependency-check-maven`
+  (backend, its NVD data feed cached across runs since a cold download is slow and would risk the
+  15-minute budget). All three currently non-blocking (`|| true`) — no CVE-triage process exists yet
+  to decide what's an acceptable finding vs. a real blocker; documented as a deliberate choice, not
+  silently weakened.
+- `image-scan` — Trivy, matrix over all three built images, `CRITICAL,HIGH` severity, also
+  report-only for the same reason.
+
+Ephemeral CI secrets (`JWT_SECRET`, `POSTGRES_PASSWORD`) are generated fresh per workflow run from
+`github.run_id`/`github.sha` rather than using `.env.example`'s literal placeholders as-is
+(`.claude/rules/security.md`: real entropy required, the app fails startup loudly otherwise) —
+never committed, never reused across runs.
+
+**Not yet verified: an actual GitHub Actions run.** Everything above is verified locally (YAML
+parses, every referenced command has been run directly and works, all three Dockerfiles build).
+Whether the workflow behaves correctly end-to-end on GitHub's actual runners — path filtering,
+service health-check timing, cache behavior, the full acceptance criteria (green on a clean push, a
+broken commit fails the right job, total runtime < 15 min, no secret printed in a log) — is
+unverified until it actually runs there, which requires pushing to the remote. Not done without
+asking first — pushing/triggering CI is a visible, run-consuming action distinct from local commits.
+
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 11 — CI/CD (**starting**); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
+| **Current phase** | Phase 11 — CI/CD (**in progress**); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
 | **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
 | **Phase 10 status** | All roadmap deliverables done except the real-Gemini evaluation baseline and A/B model comparison — both blocked on today's free-tier Gemini quota resetting. Deferred per explicit user instruction to proceed to Phase 11/12 rather than wait; will be picked up once quota allows. |
-| **Next milestone** | Phase 11: GitHub Actions pipeline (lint → unit → integration → build → Docker build → eval(mock) → security scan), branch protection, no secret ever printed in a log |
+| **Phase 11 status** | `.github/workflows/ci.yml` written, Dockerfiles for all 3 services built and locally verified, `package.json`'s missing `test` script fixed. Not yet verified against a real GitHub Actions run (requires pushing — not done without asking first). |
+| **Next milestone** | Get explicit sign-off to push and observe a real CI run; then Phase 12: production Dockerfiles hardening (non-root/slim/healthchecked — the `ai-service` image-size item lives here), `docker-compose.prod.yml`, `make demo`, RUNBOOK, backup/restore |
 
 ## Completed
 
@@ -1637,6 +1715,8 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
 | E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
 | Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
+| Docker builds | spring-api ✅ (468MB), frontend ✅ (93MB), ai-service ✅ (built + inspected successfully twice this session; a later rebuild hit Docker Desktop's own disk ceiling from cumulative session testing — not a Dockerfile defect, see Phase 11 entry) |
+| CI (`.github/workflows/ci.yml`) | Written, YAML-valid, every referenced command individually verified to work locally — **not yet run on GitHub Actions** (requires a push; not done without asking first) |
 
 ## Environment facts (verified 2026-08-10)
 
@@ -1656,26 +1736,26 @@ other stack is running.
 
 ## Recommended next action
 
-Phase 10 is done except two explicitly-deferred, quota-blocked items (see "Blocked" above). Per
-explicit user instruction (2026-08-12), proceed to Phase 11 now rather than wait:
+Per explicit user instruction (2026-08-12): proceed through Phase 11 and Phase 12; Phase 13
+(Kubernetes) is explicitly out of scope, do not start it; the two quota-blocked Phase 10 items are
+deliberately deferred, not blocking.
 
-1. **Commit this session's final Phase 10 pieces** (implemented and verified, not yet committed):
-   `tests/prompts/test_compose.py`, `DecisionFlowIT.java`, `KnowledgeFlowIT.java`, plus this
-   STATUS.md/TODO.md update.
-2. **Start Phase 11 — CI/CD** (`docs/IMPLEMENTATION/ROADMAP.md`): a GitHub Actions pipeline —
-   lint → unit → integration (Testcontainers) → build → Docker build → evaluation (mock provider,
-   deterministic) → security scan (`pip-audit`, `npm audit`, dependency-check, Trivy). Path-filtered
-   jobs, dependency caching, branch protection. Acceptance: green on a clean push, a deliberately
-   broken commit fails the right job, Docker images build for all three services, total runtime
-   < 15 min, secret scanning enabled, no secret ever printed in a log. Nothing in `.github/workflows/`
-   exists yet — this is a from-scratch build, not a refinement.
-3. **Then Phase 12 — Local deployment hardening**: production-style multi-stage Dockerfiles
-   (non-root, slim, healthchecked) for all three services — none exist yet; `docker-compose.prod.yml`;
-   a real `make demo`/`make migrate`/`make seed` (all three are still literal Phase 0–2 placeholder
+1. **Commit this session's Phase 11 work** (implemented and locally verified, not yet committed):
+   `.github/workflows/ci.yml`, the three `Dockerfile`s + `.dockerignore`s, `nginx.conf.template`,
+   `package.json`'s `test` script fix, `.env.example`'s `API_PROXY_TARGET` addition.
+2. **Ask the user for explicit sign-off before pushing to the remote.** Nothing above has been
+   verified against a real GitHub Actions run — only that the YAML parses and every command it
+   invokes works when run directly. Pushing/triggering CI is a visible, run-consuming action
+   distinct from a local commit (git safety protocol: don't push without being asked). Once
+   approved: push, watch the run, and fix whatever a real runner surfaces that local verification
+   couldn't (service health-check timing, cache behavior, path-filter edge cases, the actual
+   < 15 min runtime, whether a deliberately-broken commit fails the right job).
+3. **Then Phase 12 — Local deployment hardening**: harden the three Dockerfiles to Phase 12's own
+   bar (non-root — already done; slim — the `ai-service` image-size problem lives here, see the
+   Phase 11 entry above for what was already tried; healthchecked); `docker-compose.prod.yml`; a
+   real `make demo`/`make migrate`/`make seed` (all three are still literal Phase 0–2 placeholder
    stubs in the Makefile today); `docs/OPERATIONS/RUNBOOK.md`; a Postgres backup/restore script.
-4. **Phase 13 (Kubernetes) is explicitly out of scope** for this project (user instruction,
-   2026-08-12) — do not start it.
-5. Once real-Gemini quota resets, come back to the two deferred Phase 10 items: `make eval
+4. Once real-Gemini quota resets, come back to the two deferred Phase 10 items: `make eval
    PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`
    (the representative subset already agreed with the user), then write
-   `docs/AI/EVALUATION_BASELINE.md`, then the A/B model comparison.
+   `docs/AI/EVALUATION_BASELINE.md`, then the A/B model comparison. Not blocking Phase 11/12.

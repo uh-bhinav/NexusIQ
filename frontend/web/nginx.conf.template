@@ -1,0 +1,26 @@
+# Rendered via envsubst by nginx:alpine's built-in
+# /docker-entrypoint.d/20-envsubst-on-templates.sh — API_PROXY_TARGET is a
+# real runtime env var (docker-compose.prod.yml sets it to the spring-api
+# service), not a build-time value baked into the image.
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # React Router: any path without a file extension falls through to the
+    # SPA shell, which then resolves the route client-side.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Mirrors vite.config.ts's dev-server proxy so the browser never needs
+    # CORS config in production either — Java owns the real API.
+    location /api/ {
+        proxy_pass ${API_PROXY_TARGET}/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

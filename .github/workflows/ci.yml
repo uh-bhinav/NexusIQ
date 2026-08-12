@@ -1,0 +1,322 @@
+name: CI
+
+# Phase 11 (docs/IMPLEMENTATION/ROADMAP.md): lint -> unit -> integration ->
+# build -> Docker build -> evaluation (mock provider) -> security scan.
+# Path-filtered per service so a docs-only or single-service change doesn't
+# pay for the other two services' pipelines.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Real entropy, generated fresh per run — never committed, never reused
+  # across runs (.claude/rules/security.md: "JWT_SECRET >= 32 bytes of real
+  # entropy... fail startup loudly if missing/placeholder"). Root .env.example
+  # ships literal placeholders on purpose; CI must not use them as-is.
+  CI_POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}-pg
+  CI_JWT_SECRET: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}-jwt-secret-min-32-bytes
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      ai_service: ${{ steps.filter.outputs.ai_service }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      shared: ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared:
+              - 'docker-compose.yml'
+              - '.env.example'
+              - '.github/workflows/ci.yml'
+            backend:
+              - 'backend/spring-api/**'
+            ai_service:
+              - 'ai-service/**'
+            frontend:
+              - 'frontend/web/**'
+
+  backend-unit:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/spring-api/pom.xml
+      - name: Unit tests (Surefire, no Docker)
+        working-directory: backend/spring-api
+        run: ./mvnw -B -q test
+
+  backend-integration:
+    needs: [changes, backend-unit]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/spring-api/pom.xml
+      - name: Full verify (Surefire + Failsafe, Testcontainers manages its own Postgres/Kafka via the runner's pre-installed Docker)
+        working-directory: backend/spring-api
+        run: ./mvnw -B -q verify
+
+  ai-service-test:
+    needs: changes
+    if: needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate an ephemeral .env for the shared compose stack
+        run: |
+          cp .env.example .env
+          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${CI_POSTGRES_PASSWORD}/" .env
+          sed -i "s/^JWT_SECRET=.*/JWT_SECRET=${CI_JWT_SECRET}/" .env
+      - name: Start Postgres + Redis + Kafka (same compose file as local dev)
+        run: docker compose up -d postgres redis kafka
+      - name: Wait for Postgres + Kafka to report healthy
+        run: |
+          for svc in postgres kafka; do
+            timeout 90 bash -c "until [ \"\$(docker inspect -f '{{.State.Health.Status}}' nexusiq-$svc 2>/dev/null)\" = 'healthy' ]; do sleep 2; done"
+          done
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Apply Flyway migrations (ai-service's tests read/write real tables Java owns the schema for)
+        working-directory: backend/spring-api
+        run: |
+          ./mvnw -B -q flyway:migrate \
+            -Dflyway.url="jdbc:postgresql://localhost:5434/nexusiq" \
+            -Dflyway.user=nexusiq \
+            -Dflyway.password="${CI_POSTGRES_PASSWORD}"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: ai-service/uv.lock
+      - name: Lint + typecheck
+        working-directory: ai-service
+        run: |
+          uv run ruff check app tests
+          uv run mypy app
+      - name: Test (real Postgres/Kafka/Redis, mock LLM provider — deterministic, $0)
+        working-directory: ai-service
+        env:
+          NEXUSIQ_ENV: ci
+          LLM_PROVIDER: mock
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5434'
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
+          KAFKA_BOOTSTRAP_SERVERS: localhost:29093
+          REDIS_HOST: localhost
+          REDIS_PORT: '6380'
+          STORAGE_LOCAL_PATH: /tmp/nexusiq-documents
+        run: uv run pytest -q
+
+  frontend-test:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - working-directory: frontend/web
+        run: npm ci
+      - working-directory: frontend/web
+        run: npx tsc --noEmit
+      - working-directory: frontend/web
+        run: npm run lint
+      - working-directory: frontend/web
+        run: npm test
+      - working-directory: frontend/web
+        run: npm run build
+
+  evaluate:
+    # Phase 10's harness, mock provider only — real quality baselines use a
+    # real LLM provider and are run locally/manually (docs/AI/EVALUATION.md:
+    # "CI runs the harness with the mock provider so results are
+    # deterministic and cost nothing"). This job proves the harness itself
+    # still runs end to end on every change that could affect it, not a
+    # quality gate.
+    needs: changes
+    if: needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.shared == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate an ephemeral .env for the shared compose stack
+        run: |
+          cp .env.example .env
+          sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=${CI_POSTGRES_PASSWORD}/" .env
+          sed -i "s/^JWT_SECRET=.*/JWT_SECRET=${CI_JWT_SECRET}/" .env
+      - name: Start Postgres + Redis + Kafka
+        run: docker compose up -d postgres redis kafka
+      - name: Wait for Postgres + Kafka to report healthy
+        run: |
+          for svc in postgres kafka; do
+            timeout 90 bash -c "until [ \"\$(docker inspect -f '{{.State.Health.Status}}' nexusiq-$svc 2>/dev/null)\" = 'healthy' ]; do sleep 2; done"
+          done
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Apply Flyway migrations
+        working-directory: backend/spring-api
+        run: |
+          ./mvnw -B -q flyway:migrate \
+            -Dflyway.url="jdbc:postgresql://localhost:5434/nexusiq" \
+            -Dflyway.user=nexusiq \
+            -Dflyway.password="${CI_POSTGRES_PASSWORD}"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: ai-service/uv.lock
+      - name: Run the evaluation harness (mock provider)
+        working-directory: ai-service
+        env:
+          NEXUSIQ_ENV: ci
+          LLM_PROVIDER: mock
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5434'
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
+          KAFKA_BOOTSTRAP_SERVERS: localhost:29093
+          REDIS_HOST: localhost
+          REDIS_PORT: '6380'
+          STORAGE_LOCAL_PATH: /tmp/nexusiq-documents
+        run: uv run python -m app.evaluation.harness --provider mock
+
+  docker-build:
+    needs: [changes, backend-integration, ai-service-test, frontend-test]
+    # Runs if any service changed, even if that service's own test job was
+    # skipped (path-filtered) — always: lets one changed service's image
+    # rebuild without requiring the other two to have also changed, while
+    # still gating on whichever test jobs *did* run actually passing.
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: spring-api
+            context: backend/spring-api
+          - service: ai-service
+            context: ai-service
+          - service: frontend
+            context: frontend/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service }} image (no push — $0 infra, no registry configured)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: false
+          tags: nexusiq-${{ matrix.service }}:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/${{ matrix.service }}.tar
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp/${{ matrix.service }}.tar
+          retention-days: 1
+
+  dependency-scan:
+    needs: changes
+    if: always() && needs.changes.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        if: needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: ai-service/uv.lock
+      - name: pip-audit (ai-service dependencies)
+        if: needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.shared == 'true'
+        working-directory: ai-service
+        run: uvx pip-audit --strict || true # non-blocking until a triage process exists for known transitive CVEs
+
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - working-directory: frontend/web
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+        run: npm ci
+      - name: npm audit (frontend dependencies)
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+        working-directory: frontend/web
+        run: npm audit --omit=dev || true # non-blocking until a triage process exists
+
+      - uses: actions/setup-java@v4
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/spring-api/pom.xml
+      # The NVD data feed this plugin downloads is large and slow on a cold
+      # cache (well-documented OWASP dependency-check behavior without an
+      # NVD API key) — cached across runs so only the first run (or a weekly
+      # refresh) pays that cost, keeping this within the 15-minute budget.
+      - uses: actions/cache@v4
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: dependency-check-data-${{ github.run_id }}
+          restore-keys: dependency-check-data-
+      - name: OWASP dependency-check (Java dependencies)
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+        working-directory: backend/spring-api
+        run: ./mvnw -B -q org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=9 || true
+
+  image-scan:
+    needs: docker-build
+    if: always() && needs.docker-build.result == 'success'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [spring-api, ai-service, frontend]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: /tmp/images
+      - name: Load built image
+        run: docker load -i /tmp/images/${{ matrix.service }}.tar
+      - name: Trivy scan (container image)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: image
+          image-ref: nexusiq-${{ matrix.service }}:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          exit-code: '0' # report-only until a triage process exists; see pip-audit/npm audit above

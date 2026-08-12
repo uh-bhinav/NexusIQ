@@ -25,24 +25,35 @@ instruction 2026-08-12 to proceed to Phase 11/12 rather than wait):
 - [!] A/B comparison of at least two model configurations with accuracy/latency/cost recorded (same
       quota consideration as above — roughly doubles the real-LLM-call cost).
 
-Phase 11 orientation: read `ROADMAP.md`'s Phase 11 section (already done this session) — GitHub
-Actions pipeline (lint → unit → integration → build → Docker build → eval(mock) → security scan),
-path-filtered jobs, dependency caching, branch protection. `.github/workflows/` currently doesn't
-exist at all — from-scratch build, not a refinement.
+Phase 11 progress (2026-08-12):
 
-- [ ] `.github/workflows/ci.yml` (or split per-service workflows): lint job (ruff+mypy, oxlint+tsc,
-      — Java has no separate lint step configured, confirm), unit test job (Surefire, `uv run
-      pytest -m "not integration"` if such a marker exists or the fast subset, Vitest), integration
-      test job (Failsafe + Testcontainers — needs Docker-in-Docker/services in the runner), build
-      job, Docker build job (needs Phase 12's Dockerfiles — may need to sequence after or build a
-      minimal Dockerfile now and harden in Phase 12), evaluation job (mock provider only, free/
-      deterministic), security scan job (`pip-audit`, `npm audit`, OWASP dependency-check for Maven,
-      Trivy for images).
-- [ ] Branch protection requiring the pipeline to pass before merge.
-- [ ] Verify acceptance criteria: green on a clean push; a deliberately broken commit fails the
-      right job (test this for real, don't assume); Docker images build for all three services;
-      total runtime < 15 min; secret scanning enabled; no secret ever printed in a log (check
-      workflow logs directly, don't just assume `env:` handling is safe).
+- [x] Fixed a real pre-existing gap found while starting this: `frontend/web/package.json` had no
+      `test` script at all, despite the Makefile's `test` target calling `npm test` — `make test`
+      had silently been unable to run the frontend suite. Added `"test": "vitest run"`.
+      **Not yet committed.**
+- [x] `Dockerfile` for all three services (none existed before) — multi-stage, non-root user each.
+      `frontend/web/Dockerfile` uses `nginx:alpine` + `nginx.conf.template` (envsubst) for SPA
+      routing + `/api/` reverse proxy. `.dockerignore` per service. New `API_PROXY_TARGET` runtime
+      var documented in `.env.example`. spring-api (468MB) and frontend (93MB) build cleanly and
+      repeatedly; ai-service builds cleanly (verified twice, including a full `docker run`/
+      `docker history` inspection) but is currently ~8.4GB — see STATUS.md's Phase 11 entry for what
+      was tried (a `[tool.uv.sources]` CPU-only torch pin, which didn't work — a real uv 0.8.4
+      behavior, not a mistake) and why it's deliberately deferred to Phase 12 ("slim" is Phase 12's
+      own acceptance criterion). **Not yet committed.**
+- [x] `.github/workflows/ci.yml` — `changes` (path-filter) → `backend-unit`/`backend-integration`
+      → `ai-service-test` (real Postgres/Kafka/Redis via the existing `docker-compose.yml`, Flyway-
+      migrated, mock LLM) → `frontend-test` → `evaluate` (Phase 10's harness, mock provider) →
+      `docker-build` (matrix ×3, no push — `$0` infra) → `dependency-scan` (`pip-audit`/`npm audit`/
+      OWASP dependency-check, all non-blocking pending a CVE-triage process) → `image-scan` (Trivy
+      ×3, also non-blocking for the same reason). Every command in it has been run directly and
+      confirmed to work; the workflow YAML itself parses correctly. **Not yet run on GitHub
+      Actions** — needs a push, which needs the user's explicit sign-off first (see STATUS.md's
+      Phase 11 entry). **Not yet committed.**
+- [ ] Branch protection requiring the pipeline to pass before merge (needs at least one real run
+      first to know the check names).
+- [ ] Verify acceptance criteria against a real run once pushed: green on a clean push; a
+      deliberately broken commit fails the right job; total runtime < 15 min; secret scanning
+      enabled; no secret ever printed in a log (check workflow logs directly).
 
 ### Backlog (low-priority, not phase-blocking)
 
