@@ -30,7 +30,7 @@ export function DecisionDetailPage() {
   })
   const auditQuery = useQuery({
     queryKey: ['audit', 'decision', decisionId],
-    queryFn: () => listAuditForResource('decision', decisionId),
+    queryFn: () => listAuditForResource(workspaceId, 'decision', decisionId),
   })
 
   return (

@@ -6,7 +6,7 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 10 in progress.** Three pieces landed this session.
+**Last verified:** 2026-08-12 — **Phase 10 in progress.** Four pieces landed this session.
 
 (1) Audited all 14 named failure-scenario tests from `.claude/rules/testing.md`: 9 were already
 covered, 5 were gaps (#2 contradictory documents, #3 two policy versions, #6 LLM timeout retry, #9
@@ -104,6 +104,32 @@ thing genuinely useful: the harness's own error handling works correctly under a
 case became a clean `CaseResult.error` (`cases: 8, errors: 8` reported plainly), not a crash and not
 a silently-wrong success. No usable quality numbers came out of this attempt. Retry once the quota
 resets — see "Recommended next action" for the exact command.
+
+(4) Audited genuine test-coverage gaps across all three services (a targeted Explore-agent survey,
+not a coverage-percentage exercise — `.claude/rules/testing.md`: "coverage is a signal, not a
+target"). The audit found several real gaps (ranked list kept in this session's history, not
+duplicated here), but the top one was a live, previously-shipped security defect, not just a
+missing test: **`GET /audit/resource/{resourceType}/{resourceId}` had zero workspace-membership
+check.** Any authenticated user could pull another workspace's resource-scoped audit history
+(document uploads, decision requests, approvals) by guessing a resource type and UUID — a direct
+violation of `.claude/rules/security.md`'s "Cross-tenant leakage is the single worst failure this
+system can have." The endpoint had carried a comment since Phase 1 saying "revisit when decisions/
+approvals land" — they had, two phases ago, and it never was. Fixed: the endpoint now requires
+`workspaceId` and calls `workspaceAccessService.requireMembership` exactly like its sibling `GET
+/audit` does; `AuditEventRepository.findAllForResource` now filters on `workspace_id` in SQL, not
+just resource type/id (`.claude/rules/database.md`: "Every query filters on workspace_id in SQL.
+Not in Java."). Frontend `listAuditForResource`/`DecisionDetailPage` updated to pass the
+already-available `workspaceId` route param through. New `AuditFlowIT.java` (3 tests, this
+controller had zero tests of any kind before) proves the fix the same way `WorkspaceFlowIT` proves
+its own cross-tenant cases: an outsider gets `404`, the actual member gets `200`, and — a second,
+smaller bug this surfaced — a request missing the now-required `workspaceId` was returning a raw
+`500` instead of `400` (no handler existed for `MissingServletRequestParameterException`, so it fell
+through `GlobalExceptionHandler`'s catch-all). Added handlers for that and the analogous
+`MethodArgumentTypeMismatchException` (a malformed UUID path/query param), both mapped to the
+standard `VALIDATION_ERROR` 400 envelope. `./mvnw verify` → 72 unit + 37 integration (+3
+`AuditFlowIT`) passed, 0 failures. `tsc --noEmit`/Vitest rerun clean, 44/44 frontend tests
+(unaffected by the `audit.ts` signature change — the added query param doesn't break the existing
+MSW path-matched mock).
 
 ## Current position
 
@@ -1525,7 +1551,6 @@ state). Harmless local dev noise, not a shipped defect; a fresh environment or
 | `schema_repair_rate`, `budget_exceeded_count`, `agent_failure_rate`, `llm_error_count` (OTel Python counters) didn't fire during the one live run performed (mock provider never needed a repair retry, never exceeded budget, every node/LLM call succeeded) — their exact suffix is inferred by the now-confirmed counter-suffix rule (see Phase 8's "Resolved from Technical debt" note) rather than independently observed | Low — the rule is confirmed on 5 other counters including one with a pre-existing `_count`/`_total` in its base name (`retrieval_empty_count` → `retrieval_empty_count_total`), so this is pattern-confidence, not a guess | Trivial to confirm the next time any of these actually fire (e.g. force a schema-validation failure or a budget breach in a live run) |
 | Multiple duplicate `up{job="spring-api"}` time series accumulated in the local Prometheus TSDB from this session's port changes (`8080` stale/down alongside `8180` live) | Cosmetic — Prometheus keeps stale series until they age out; doesn't affect current queries, which correctly resolve to the live instance | `docker compose down -v` on prometheus (or just wait for retention) if it's ever visually annoying |
 | Refresh tokens are stateless JWTs with no server-side revocation list | A leaked/stolen refresh token is valid until natural expiry (7d default); acceptable for a portfolio-scale project | Revisit if a real threat model demands revocation |
-| `AuditController.forResource` is still not workspace-gated (no generic-enough resource type existed when this was first noted; decisions/approvals now exist but the endpoint hasn't been revisited) | Same pre-existing Phase 1 gap, not widened by Phase 7 | Whenever another auth-hardening pass happens |
 | Live-verification decisions across Phase 5/6 (`gemini-2.5-flash`/`gemini-3.6-flash`) tend toward extreme confidence values (0.2 or 1.0), rarely a calibrated middle value — same under-calibration noted in Phase 4 | Not a defect against either phase's acceptance criteria (schema and routing are correct); a prompt-tuning problem | Phase 10 evaluation pass |
 | A resume failure in `handle_approval_message` (ai-service) leaves the LangGraph checkpoint interrupted with no automatic retry — single-attempt by design, matching the sibling `decision.requested` consumer's philosophy, but there is genuinely no path back to a clean terminal state if it happens | Rare (no LLM calls, no external I/O beyond Postgres on the resume path — a real DB outage at exactly that moment is the main plausible cause); Java's own approval record is already correct regardless, so only the Python-side checkpoint is affected | If ever observed for real; a manual `graph.ainvoke(Command(resume=...), thread_config)` replay would recover it today |
 | `GET /workspaces/{id}/approvals` is viewable by any workspace member, not just `APPROVER`/`ADMIN` — only the approve/reject actions are role-gated | Matches "act on the queue" being the roadmap's literal restriction (AC6), and mirrors how decisions/documents lists are member-gated only; not reconsidered against a stricter read model | Revisit only if a real need for read-restriction emerges |
@@ -1546,7 +1571,7 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 |---|---|
 | Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
 | Java unit (`*Test`, Surefire) | ✅ 72/72 (+9 `ApprovalGateTest`, new this phase — all 7 `ApprovalGate` triggers plus a clean-payload and an `INSUFFICIENT_INFORMATION` negative case) |
-| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 34/34 |
+| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 37/37 (+3 `AuditFlowIT`, new this phase — the cross-tenant fix for `GET /audit/resource/...`) |
 | Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 208/208 (+9 failure-scenario gaps, +19 `tests/evaluation/test_metrics.py`) |
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
 | Frontend (`vitest`, RTL + MSW) | ✅ 44/44 |
@@ -1594,6 +1619,20 @@ Continue Phase 10. Concretely, in roughly this order:
    (e.g. cheap-everywhere vs the heavier model on synthesis/validation) across accuracy, latency, and
    cost, using the harness's `--provider`/settings overrides already built. Same quota consideration
    as above — this roughly doubles the real-LLM-call cost of step 2.
+4. **Commit the `AuditController` cross-tenant fix** (currently implemented and verified, but
+   uncommitted — see the Phase 10 entry above): `AuditController.java`, `AuditEventRepository.java`,
+   `GlobalExceptionHandler.java`'s two new handlers, `AuditFlowIT.java`, and the frontend
+   `audit.ts`/`DecisionDetailPage.tsx` signature change.
+5. **Continue closing the remaining genuine coverage gaps** this session's audit surfaced (not yet
+   acted on): `LocalDocumentStorage` has zero test file (path-traversal guard, checksum logic
+   unexercised); the frontend's mandated 401→refresh→retry-once→logout interceptor
+   (`src/api/client.ts`) has no dedicated test for the refresh path itself; `ai-service/app/prompts/
+   compose.py` (splices the injection-defense fragment into every agent's system prompt) has no
+   `tests/prompts/` at all; `decision/DecisionController.java`, `document/DocumentController.java`,
+   `knowledge/KnowledgeController.java` lack a `*FlowIT.java` with an explicit cross-tenant `404`
+   check the way Auth/Workspace/Approval/Audit now all have. Prioritize in that order — the first
+   three are security/integrity-relevant, the fourth is a consistency gap against an established
+   pattern that's already caught one real bug (this session's `AuditController` fix).
 
 Phase 8 itself is fully done, including live verification — nothing further needed there except the
 confidence-calibration technical debt from Phase 4/7 (unrelated, low priority, Phase 10 territory).

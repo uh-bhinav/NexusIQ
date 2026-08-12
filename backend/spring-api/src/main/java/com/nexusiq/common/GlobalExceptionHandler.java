@@ -16,8 +16,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 /**
@@ -71,6 +73,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ValidationException.class)
     public ResponseEntity<ApiError> handleValidation(ValidationException ex, HttpServletRequest req) {
         return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", ex.getMessage(), req, null);
+    }
+
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParam(
+            MissingServletRequestParameterException ex, HttpServletRequest req) {
+        var detail = new ApiError.FieldDetail(ex.getParameterName(), "must not be missing");
+        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Request validation failed", req, List.of(detail));
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> handleTypeMismatch(
+            MethodArgumentTypeMismatchException ex, HttpServletRequest req) {
+        String typeName = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "the expected type";
+        var detail = new ApiError.FieldDetail(ex.getName(), "must be a valid " + typeName);
+        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Request validation failed", req, List.of(detail));
     }
 
     @ExceptionHandler({PayloadTooLargeException.class, MaxUploadSizeExceededException.class})

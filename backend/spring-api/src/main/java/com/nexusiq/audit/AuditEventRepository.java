@@ -26,9 +26,13 @@ public interface AuditEventRepository extends Repository<AuditEvent, UUID> {
     @Query(
             """
             select a from AuditEvent a
-            where a.resourceType = :resourceType and a.resourceId = :resourceId
+            where a.workspaceId = :workspaceId
+              and a.resourceType = :resourceType and a.resourceId = :resourceId
             order by a.occurredAt desc
             """)
     Page<AuditEvent> findAllForResource(
-            @Param("resourceType") String resourceType, @Param("resourceId") UUID resourceId, Pageable pageable);
+            @Param("workspaceId") UUID workspaceId,
+            @Param("resourceType") String resourceType,
+            @Param("resourceId") UUID resourceId,
+            Pageable pageable);
 }

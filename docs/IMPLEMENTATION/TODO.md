@@ -39,8 +39,24 @@ the full history (kept there per this file's own "delete completed items" conven
       test only, not a quality baseline** (mock's fixtures are fixed regardless of the question
       asked — verified empirically, not assumed). See STATUS.md's Phase 10 entry for the full
       detail. **Committed as `2623d52`.**
-- [ ] Close remaining coverage gaps in all three services (Java/Python/frontend) — identify what's
-      genuinely untested first, don't pad numbers.
+- [x] Audited genuine coverage gaps across all three services (Explore-agent survey, ranked by
+      risk). Fixed the top one: `GET /audit/resource/{resourceType}/{resourceId}` had **zero
+      workspace-membership check** — a real, previously-shipped cross-tenant leak (any authenticated
+      user could read another workspace's document/decision/approval audit history by guessing a
+      resource type + UUID). Fixed: endpoint now requires `workspaceId` + membership check, repo
+      query filters on `workspace_id` in SQL, frontend threads the param through. New
+      `AuditFlowIT.java` (3 tests — this controller had none before) also surfaced a second bug: a
+      missing required query param 500'd instead of 400'ing (no `GlobalExceptionHandler` case for
+      `MissingServletRequestParameterException`) — added that plus the analogous
+      `MethodArgumentTypeMismatchException` handler. `./mvnw verify` → 72 unit + 37 integration (+3),
+      0 failures. See STATUS.md's Phase 10 entry for the full detail. **Not yet committed.**
+- [ ] Remaining coverage gaps from the same audit, not yet acted on (priority order): `Local
+      DocumentStorage` has zero test file (path-traversal guard, checksum logic unexercised); the
+      frontend's 401→refresh→retry-once→logout interceptor (`src/api/client.ts`) has no dedicated
+      test for the refresh path; `ai-service/app/prompts/compose.py` (splices the injection-defense
+      fragment into every agent prompt) has no tests at all; `decision/DecisionController.java`,
+      `document/DocumentController.java`, `knowledge/KnowledgeController.java` lack a `*FlowIT.java`
+      with an explicit cross-tenant `404` check the way Auth/Workspace/Approval/Audit now all have.
 - [ ] **Retry the real-Gemini baseline once the free-tier daily quota resets.** Already asked the
       user and got sign-off for a small representative subset (one case per category, 8/9
       categories) rather than the full 30. Attempted it — all 8 cases hit `429 RESOURCE_EXHAUSTED`

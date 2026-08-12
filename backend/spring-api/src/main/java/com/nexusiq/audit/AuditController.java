@@ -38,11 +38,10 @@ public class AuditController {
     public PageResponse<AuditEventResponse> forResource(
             @PathVariable String resourceType,
             @PathVariable UUID resourceId,
+            @RequestParam UUID workspaceId,
             @PageableDefault(size = 20) Pageable pageable) {
-        // Resource-level history is intentionally not workspace-gated here in Phase 1
-        // (no resource type besides documents/workspaces exists yet to check
-        // membership against generically); revisit when decisions/approvals land.
-        var page = repository.findAllForResource(resourceType, resourceId, pageable);
+        workspaceAccessService.requireMembership(workspaceId, CurrentUser.id());
+        var page = repository.findAllForResource(workspaceId, resourceType, resourceId, pageable);
         return PageResponse.of(page, this::toResponse);
     }
 

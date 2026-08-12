@@ -6,9 +6,15 @@ export async function listAuditEvents(workspaceId: string, page = 0, size = 20) 
   return AuditEventPage.parse(response.data)
 }
 
-export async function listAuditForResource(resourceType: string, resourceId: string, page = 0, size = 20) {
+export async function listAuditForResource(
+  workspaceId: string,
+  resourceType: string,
+  resourceId: string,
+  page = 0,
+  size = 20,
+) {
   const response = await apiClient.get(`/audit/resource/${resourceType}/${resourceId}`, {
-    params: { page, size },
+    params: { workspaceId, page, size },
   })
   return AuditEventPage.parse(response.data)
 }
