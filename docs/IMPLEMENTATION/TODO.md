@@ -38,13 +38,18 @@ the full history (kept there per this file's own "delete completed items" conven
       mock provider: 30/30 cases, 0 errors — confirms the harness is correct, but this is a **smoke
       test only, not a quality baseline** (mock's fixtures are fixed regardless of the question
       asked — verified empirically, not assumed). See STATUS.md's Phase 10 entry for the full
-      detail. **Not yet committed.**
+      detail. **Committed as `2623d52`.**
 - [ ] Close remaining coverage gaps in all three services (Java/Python/frontend) — identify what's
       genuinely untested first, don't pad numbers.
-- [ ] **Get explicit user sign-off before spending real Gemini quota**, then run `make eval
-      PROVIDER=gemini` for the actual quality baseline (~150–180 real LLM calls for all 30 cases —
-      well beyond a "a few calls" ask and the ~20-requests/day free-tier quota; may need to spread
-      across days or start with a subset). Then write `docs/AI/EVALUATION_BASELINE.md`.
+- [ ] **Retry the real-Gemini baseline once the free-tier daily quota resets.** Already asked the
+      user and got sign-off for a small representative subset (one case per category, 8/9
+      categories) rather than the full 30. Attempted it — all 8 cases hit `429 RESOURCE_EXHAUSTED`
+      immediately, quota already exhausted from this session's earlier live-verification calls.
+      Harness's own error handling confirmed correct (clean per-case errors, no crash). Retry
+      command: `make eval PROVIDER=gemini
+      CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`. Then write
+      `docs/AI/EVALUATION_BASELINE.md` (scoped honestly as 8/30 categories unless the full 30 are
+      run later).
 - [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded (same
       quota consideration as above — roughly doubles the real-LLM-call cost).
 

@@ -93,7 +93,17 @@ baseline `docs/AI/EVALUATION.md` calls for.
 `make eval` added (`PROVIDER=mock|gemini`, `CASE=EVAL-007` for a single case — both wired through
 to the harness CLI). Full `ai-service` `pytest` suite rerun afterward: 208/208 (189 prior + 19 new),
 confirming zero regressions from the new `app/evaluation/` package. `ruff`/`mypy --strict` clean.
-**Implemented and verified but not yet committed** — see "Recommended next action".
+**Committed as `2623d52`.**
+
+Asked the user explicitly before spending real Gemini quota, per the above. They chose a small
+representative subset (one case per category, 8 of 9 categories) over the full 30. `--case` was
+extended to accept a comma-separated list for this (`3f73388`). Ran it — **all 8 cases failed
+immediately with `429 RESOURCE_EXHAUSTED`**: today's free-tier daily quota was already exhausted
+(most likely by this same session's earlier Phase 8/9 live-verification calls). This did prove one
+thing genuinely useful: the harness's own error handling works correctly under a real failure — each
+case became a clean `CaseResult.error` (`cases: 8, errors: 8` reported plainly), not a crash and not
+a silently-wrong success. No usable quality numbers came out of this attempt. Retry once the quota
+resets — see "Recommended next action" for the exact command.
 
 ## Current position
 
@@ -1564,21 +1574,22 @@ other stack is running.
 
 Continue Phase 10. Concretely, in roughly this order:
 
-1. **Commit the evaluation harness** (currently implemented and verified, but uncommitted — see the
-   Phase 10 entry above): `ai-service/app/evaluation/` (`models.py`, `metrics.py`, `corpus.py`,
-   `harness.py`), `app/evaluation/datasets/cases.json` (30 cases), `tests/evaluation/test_metrics.py`
-   (19 tests), the `make eval` target, and the `.gitignore` entry for run output. (The E2E test and
-   the failure-scenario-gap/`CONFLICTING_EVIDENCE` work from earlier in this phase are already
-   committed as `487ebff` and `a90b626`.)
-2. **Get explicit user sign-off before spending real Gemini quota**, then run `make eval
-   PROVIDER=gemini` for the actual quality baseline — the mock-provider run above is a harness
-   correctness smoke test only, not a baseline (see the Phase 10 entry above for why: `mock`'s fixed
-   fixtures make its retrieval/decision numbers artifacts of the fixture, not of the question asked).
-   A full 30-case run is ~150–180 real LLM calls, well beyond a "a few calls" ask and the documented
-   ~20-requests/day free-tier quota — likely needs spreading across more than one day, or the user
-   may prefer a smaller subset first. Once real numbers exist, write
-   `docs/AI/EVALUATION_BASELINE.md` (date, commit, `workflow_version`, `prompt_version`, model,
-   embedding model, every metric, notes).
+1. ~~Commit the evaluation harness~~ — done (`2623d52`, plus a small `--case` comma-list follow-up
+   in `3f73388`).
+2. **Retry the real-Gemini baseline once the free-tier daily quota resets.** Asked the user
+   explicitly before spending quota; they chose a small representative subset (one case per
+   category, 8 of the 9 categories: `EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,
+   EVAL-024,EVAL-027`) rather than the full 30. Ran it (`make eval PROVIDER=gemini CASE=...`) —
+   **all 8 cases failed immediately with `429 RESOURCE_EXHAUSTED`.** This confirmed the harness's
+   own error handling works correctly (each failure became a clean `CaseResult.error`, not a crash —
+   `errors: 8` reported plainly in the aggregate, no silent partial success), but produced zero
+   usable numbers: today's free-tier quota was already exhausted before this run started (most
+   likely by this same session's earlier Phase 8/9 live-verification calls — a known, already-
+   documented failure mode, see Technical debt). Command to retry verbatim once quota resets:
+   `make eval PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`.
+   Once real numbers exist, write `docs/AI/EVALUATION_BASELINE.md` (date, commit,
+   `workflow_version`, `prompt_version`, model, embedding model, every metric, notes) — scoped
+   honestly as a partial baseline (8/30 categories) unless/until the full run happens.
 3. **A/B model comparison** (`docs/AI/EVALUATION.md`): compare at least two model configurations
    (e.g. cheap-everywhere vs the heavier model on synthesis/validation) across accuracy, latency, and
    cost, using the harness's `--provider`/settings overrides already built. Same quota consideration
