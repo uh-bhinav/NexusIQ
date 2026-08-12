@@ -118,14 +118,16 @@ migrate: ## Apply Flyway migrations against the running Postgres
 seed: ## Load the sample enterprise corpus into a demo workspace (idempotent)
 	@./scripts/seed.sh
 
-demo: ## One-command demo bootstrap: full stack up, migrated, seeded, demo user ready
+demo: ## One-command demo bootstrap: full stack up (self-migrating), seeded, demo user ready
 	@test -f $(ENV_FILE) || { echo -e "$(R)No .env — run 'make env' first.$(N)"; exit 1; }
 	@echo -e "$(D)Starting the full stack (infrastructure + application services)...$(N)"
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 	@echo ""
 	@echo -e "$(D)Waiting for health checks...$(N)"
 	@$(MAKE) --no-print-directory _wait_full
-	@$(MAKE) --no-print-directory migrate
+	@echo -e "$(D)spring-api applies Flyway migrations itself on boot (spring.flyway.enabled=true)$(N)"
+	@echo -e "$(D)— no separate 'make migrate' step needed here; that target is for the host-run$(N)"
+	@echo -e "$(D)dev loop (LOCAL_DEV.md), where spring-api isn't containerized.$(N)"
 	@$(MAKE) --no-print-directory seed
 	@echo ""
 	@echo -e "$(G)Demo ready — see the credentials printed above.$(N)"

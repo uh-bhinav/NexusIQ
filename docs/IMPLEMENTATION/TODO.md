@@ -7,7 +7,7 @@ Delete completed items once their phase closes — this is a working list, not a
 
 ---
 
-## Now — start Phase 12 (Local deployment hardening)
+## Now — Phase 12 complete; small loose ends + the deferred Phase 10 items remain
 
 Phase 10 is substantially complete and Phase 11 (CI/CD) is functionally complete (fully green real
 CI run) — see `## Phase 10 — Testing & evaluation ✅` and the Phase 11 entry below, and STATUS.md
@@ -85,20 +85,30 @@ Phase 12 progress (2026-08-12):
       exact transitive-dependency scenario, not fixable by a version bump. Reverted cleanly again
       (confirmed via `git diff` — zero change). Not one of Phase 12's 5 numbered acceptance
       criteria; left open rather than pursued further.
-- [!] **Live `make demo` verification is blocked on a genuine Docker Desktop daemon failure**, not a
-      code issue: `Internal Server Error` on every API call, survived a full force-kill + relaunch.
-      Root cause diagnosed (VM disk corruption from repeated large builds hitting "no space left on
-      device" mid-write) and documented in `docs/OPERATIONS/RUNBOOK.md`'s new symptom section. The
-      real fix (Clean/Purge data, or increasing the disk allocation) needs the user's direct action
-      in Docker Desktop's own UI — not something to script around. See STATUS.md's Phase 12 entry
-      and "Blocked" section for the full trace.
-- [ ] Once Docker Desktop is healthy again: run `make demo` for real; `docker stats` to record the
-      actual memory footprint against the 16GB target (AC2); stop/restart a container and confirm no
-      data loss (AC3); confirm the corpus seeds automatically (AC4 — `make seed`'s idempotency
-      already covers "reproducibly").
-- [ ] RUNBOOK.md already existed and is substantial (built up across earlier phases) — re-check it
-      still covers "the five most likely failures" (AC5) once live verification is possible; it
-      almost certainly already does, given it currently has 15+ real, specific symptom sections.
+- [x] **Docker Desktop's environment failure resolved itself before this session** (most likely the
+      user acted in its own UI between sessions). Confirmed healthy (`docker info`) at the start of
+      this session's work.
+- [x] **Live `make demo` verification — done, all 5 acceptance criteria met with evidence.** Found
+      and fixed 4 real bugs no syntax check could have caught: (1) `ai-service` crash-looped —
+      `exec .../uvicorn: no such file or directory` — build stage `WORKDIR /build` baked a
+      `#!/build/.venv/bin/python3` shebang into venv scripts that didn't exist once copied to
+      `/app`; fixed by matching `WORKDIR /app` in both stages. (2) `frontend` reported `unhealthy`
+      forever — `wget http://localhost/` hit `::1` (container `/etc/hosts` prefers IPv6) but nginx
+      only listens on `0.0.0.0:80`; fixed by targeting `127.0.0.1` in the healthcheck instead. (3)
+      `ai-service` crash-looped again, differently — `ImportError: no pq wrapper available` from
+      bare `psycopg` (pulled in by `langgraph-checkpoint-postgres`), which needs `libpq`'s shared
+      library; `python:slim` has neither; fixed with `apt-get install libpq5` (few hundred KB). (4)
+      `scripts/seed.sh` failed at `declare -A`: macOS ships bash 3.2 by default (no associative-array
+      support); rewrote the `dir → document_type` lookup as a portable `case` statement. Also fixed
+      `seed.sh` silently letting `.env`'s stored `API_PORT` clobber an explicitly-exported override,
+      and removed `demo`'s redundant (and host-Java-21-requiring, thus broken on this machine) call
+      to `migrate` — spring-api already self-migrates on container boot
+      (`spring.flyway.enabled=true`, confirmed via its own logs). **Fixes made but not yet
+      committed** — see STATUS.md's Phase 12 entry for full detail and evidence (AC1 bootstrap time,
+      AC2 ~2.73GiB footprint, AC3 restart/no-data-loss via a documents-count check, AC4 idempotent
+      seeding, AC5 RUNBOOK coverage already sufficient — 15+ real symptom sections).
+- [ ] Commit the 4 files changed during live verification: `ai-service/Dockerfile`,
+      `frontend/web/Dockerfile`, `scripts/seed.sh`, `Makefile`.
 
 ### Backlog (low-priority, not phase-blocking)
 
@@ -274,13 +284,13 @@ Phase 12 progress (2026-08-12):
       secret printed in a log ✓, total runtime reasonable per-job ✓; "a deliberately broken commit
       fails the right job" not yet tested (see "Now" above)
 
-## Phase 12 — Local deployment hardening (starting now — see "Now" above for the live task list)
+## Phase 12 — Local deployment hardening ✅ (see "Now" above for the live-verification trace)
 
-- [ ] Multi-stage non-root Dockerfiles ×3
-- [ ] `docker-compose.prod.yml`
-- [ ] `make demo` one-command bootstrap + seeded corpus
-- [ ] RUNBOOK + demo script + volume backup/restore
-- [ ] Verify all 5 acceptance criteria
+- [x] Multi-stage non-root Dockerfiles ×3
+- [x] `docker-compose.prod.yml`
+- [x] `make demo` one-command bootstrap + seeded corpus
+- [x] RUNBOOK + demo script + volume backup/restore
+- [x] Verify all 5 acceptance criteria — done live, with evidence (see "Now" above)
 
 ## Phase 13 — Kubernetes — OUT OF SCOPE, do not start (user instruction, 2026-08-12)
 

@@ -14,5 +14,9 @@ COPY --from=build /build/dist /usr/share/nginx/html
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 ENV API_PROXY_TARGET=http://spring-api:8080
 EXPOSE 80
+# Target 127.0.0.1, not localhost: /etc/hosts resolves localhost to ::1
+# first, but nginx only listens on 0.0.0.0:80 (our template replaces the
+# base image's own IPv6 listen directive), so "localhost" gets a false
+# connection-refused — confirmed during Phase 12 live verification.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -q -O /dev/null http://localhost/ || exit 1
+  CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1

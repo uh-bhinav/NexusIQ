@@ -17,17 +17,32 @@
 
 FROM python:3.13-slim AS build
 COPY --from=ghcr.io/astral-sh/uv:0.8.4 /uv /uvx /bin/
-WORKDIR /build
+# WORKDIR must match the runtime stage's WORKDIR: `uv sync` bakes an absolute
+# interpreter shebang (#!/app/.venv/bin/python3) into every venv console
+# script. A mismatched build-stage WORKDIR (e.g. /build) produces a shebang
+# pointing at a path that doesn't exist once .venv is copied into /app,
+# which fails as a plain "no such file or directory" on the top-level binary
+# (uvicorn) rather than a clear interpreter error — confirmed during Phase
+# 12 live verification.
+WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev
 COPY app/ app/
 RUN uv sync --frozen --no-dev
 
 FROM python:3.13-slim
+# langgraph-checkpoint-postgres pulls in bare `psycopg` (pure-Python impl),
+# which needs libpq's shared library at import time — python:slim has
+# neither libpq-dev (build-time headers, not needed) nor libpq5 (the
+# runtime .so, which is). Without it: "ImportError: no pq wrapper
+# available" — confirmed during Phase 12 live verification. libpq5 alone
+# is a few hundred KB, negligible next to the rest of this image.
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
+  && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r nexusiq && useradd -r -g nexusiq nexusiq
 WORKDIR /app
-COPY --from=build /build/.venv .venv
-COPY --from=build /build/app app
+COPY --from=build /app/.venv .venv
+COPY --from=build /app/app app
 ENV PATH="/app/.venv/bin:$PATH"
 USER nexusiq
 EXPOSE 8000

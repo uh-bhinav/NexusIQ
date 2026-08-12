@@ -15,7 +15,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# Preserve an explicitly-exported API_PORT (e.g. `API_PORT=8180 make demo`,
+# used to dodge a host port conflict) — sourcing .env below would otherwise
+# silently clobber it with the file's stored default, leaving this script
+# probing a port nothing is published on. Confirmed during Phase 12 live
+# verification.
+_api_port_override="${API_PORT:-}"
 [ -f .env ] && set -a && . ./.env && set +a
+[ -n "$_api_port_override" ] && API_PORT="$_api_port_override"
 
 SPRING_BASE="${SEED_SPRING_BASE_URL:-http://localhost:${API_PORT:-8080}}"
 API_BASE="$SPRING_BASE/api/v1"
@@ -78,15 +85,22 @@ else
 fi
 
 # --- Corpus upload: skip any document already present by name (idempotent) ---
-declare -A doc_type_by_dir=(
-  [security]=SECURITY_POLICY
-  [compliance]=COMPLIANCE_POLICY
-  [procurement]=PROCUREMENT_POLICY
-  [architecture]=ARCHITECTURE_STANDARD
-  [vendors]=VENDOR_DOCUMENT
-  [historical]=HISTORICAL_DECISION
-  [incidents]=INCIDENT_REPORT
-)
+# A case statement, not an associative array: macOS ships bash 3.2 by
+# default (Apple never upgrades it past the last GPLv2 release), which
+# doesn't support `declare -A` — confirmed during Phase 12 live
+# verification. This runs on the host via `make seed`, so it must work
+# under whatever bash ships with the OS, not require a newer one.
+doc_type_for_dir() {
+  case "$1" in
+    security)     echo SECURITY_POLICY ;;
+    compliance)   echo COMPLIANCE_POLICY ;;
+    procurement)  echo PROCUREMENT_POLICY ;;
+    architecture) echo ARCHITECTURE_STANDARD ;;
+    vendors)      echo VENDOR_DOCUMENT ;;
+    historical)   echo HISTORICAL_DECISION ;;
+    incidents)    echo INCIDENT_REPORT ;;
+  esac
+}
 
 existing_names=$(curl -s "$API_BASE/workspaces/$WORKSPACE_ID/documents?size=50" -H "Authorization: Bearer $TOKEN" \
   | python3 -c "import json,sys;print('\n'.join(d['name'] for d in json.load(sys.stdin)['content']))")
@@ -94,7 +108,7 @@ existing_names=$(curl -s "$API_BASE/workspaces/$WORKSPACE_ID/documents?size=50" 
 uploaded=0
 skipped=0
 for dir in security compliance procurement architecture vendors historical incidents; do
-  doc_type="${doc_type_by_dir[$dir]}"
+  doc_type="$(doc_type_for_dir "$dir")"
   for file in docs/sample-enterprise/"$dir"/*.md; do
     [ -f "$file" ] || continue
     name=$(basename "$file")
