@@ -229,6 +229,65 @@ class _FlakyPublishProducer(DocumentEventProducer):
 
 
 @pytest.mark.asyncio
+async def test_handleMessage_transientFailureThreeTimes_routesToDlqAndPublishesFailed(tmp_path):
+    # .claude/rules/testing.md's 14 required failure scenarios, #9: "Kafka
+    # consumer failure x3 -> message in DLQ, visible." Distinct from
+    # test_handleMessage_malformedEnvelope_routesStraightToDlq above (an
+    # unparseable envelope, permanent, zero retries) and from
+    # test_handleMessage_corruptFile_... (IngestionError, permanent,
+    # explicitly non-retryable) — this is the actually-retried path: a
+    # transient failure (e.g. a DB blip) that persists for all MAX_ATTEMPTS,
+    # confirming the retry budget is real (exactly 3 attempts, not more) and
+    # that DLQ + document.failed both fire once retries are exhausted.
+    settings = get_settings().model_copy(update={"storage_local_path": str(tmp_path)})
+    producer = DocumentEventProducer(settings)
+    await producer.start()
+    try:
+        consumer = DocumentIngestionConsumer(settings, producer=producer)
+
+        async with get_session() as session:
+            workspace_id, document_id = await seed_workspace_and_document(session)
+            await session.commit()
+
+        envelope = _uploaded_envelope(workspace_id, document_id, f"{workspace_id}/never-read.md")
+        raw = envelope.model_dump_json().encode("utf-8")
+
+        dlq_task = asyncio.create_task(
+            _drain_matching(dlq(DOCUMENT_UPLOADED), settings, str(document_id).encode())
+        )
+        failed_task = asyncio.create_task(
+            _drain_matching(DOCUMENT_FAILED, settings, str(document_id).encode())
+        )
+        await asyncio.sleep(0.5)
+
+        # Patches the backoff *durations*, not asyncio.sleep itself — a
+        # global asyncio.sleep patch also stalls aiokafka's own internal
+        # timers (confirmed empirically: it hung this test's drain
+        # consumers indefinitely), and patching just this module's
+        # BACKOFF_SECONDS list is both safe and a more direct assertion of
+        # "the retry loop used these delays" than spying on sleep calls.
+        with (
+            mock.patch(
+                "app.messaging.consumer.run_ingestion_pipeline",
+                side_effect=RuntimeError("simulated transient DB blip"),
+            ) as pipeline_mock,
+            mock.patch("app.messaging.consumer.BACKOFF_SECONDS", [0.01, 0.01, 0.01]),
+        ):
+            await consumer.handle_message(raw, key=str(workspace_id).encode())
+
+        assert pipeline_mock.call_count == 3  # MAX_ATTEMPTS, not more
+
+        dlq_raw = await dlq_task
+        assert dlq_raw == raw  # the original message, unmodified, for replay/inspection
+
+        failed_raw = (await failed_task).decode("utf-8")
+        assert str(document_id) in failed_raw
+        assert "3 attempts" in failed_raw
+    finally:
+        await producer.stop()
+
+
+@pytest.mark.asyncio
 async def test_handleMessage_publishFailsAfterCommit_retrySucceedsWithoutRedoingWork(tmp_path):
     """Regression test for a real bug found in a live run: if the DB commit
     succeeds but the subsequent publish fails transiently, a naive retry would

@@ -113,3 +113,43 @@ async def test_search_secondIdenticalQuery_isServedFromCache():
         assert first.cached is False
         assert second.cached is True
         assert second.results[0].content == first.results[0].content
+
+
+@pytest.mark.asyncio
+async def test_search_redisUnavailable_stillReturnsResultsFromPostgres():
+    # .claude/rules/architecture.md's degradation table: "Redis down -> Serve
+    # from Postgres, log cache-miss metric. Never fail the request." Points
+    # redis_host at a real, closed TCP port (nothing listens on 6399 in this
+    # environment) rather than mocking RetrievalCache — this exercises the
+    # actual connection-refused path through get_cache()'s real redis-py
+    # client, not a stand-in for it. get_cache() builds a fresh client per
+    # call from settings.redis_url, so overriding just this setting is
+    # enough; Postgres and the embedding/reranker models stay real.
+    async with get_session() as session:
+        user_id, workspace_id = await _seed_user_and_workspace(session)
+        await _seed_document_with_chunk(
+            session,
+            workspace_id,
+            user_id,
+            "All incident response commitments require a 4-hour notification window.",
+        )
+        await session.commit()
+
+        settings = get_settings().model_copy(update={"redis_host": "localhost", "redis_port": 1})
+
+        response = await search(
+            session, workspace_id, "incident notification window", settings=settings
+        )
+
+        assert response.cached is False
+        assert len(response.results) == 1
+        assert "4-hour notification" in response.results[0].content
+
+        # A cache *write* failing after a real search must not raise either
+        # — the response already returned to the caller must not later be
+        # invalidated by a background cache-population error.
+        second = await search(
+            session, workspace_id, "incident notification window", settings=settings
+        )
+        assert second.cached is False
+        assert len(second.results) == 1
