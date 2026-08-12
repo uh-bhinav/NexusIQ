@@ -303,6 +303,17 @@ job in both runs so far. Bumped all ten to their current major version
 leave known-stale pins that would just need fixing again soon. Not yet re-verified with a third
 push — YAML parses, but the major bumps themselves are unverified beyond that.
 
+**Third push, run [31592490873](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592490873):**
+one of the nine major-version bumps was wrong — `astral-sh/setup-uv@v9` doesn't resolve (`Unable to
+resolve action... unable to find version v9`), failing `evaluate`/`ai-service-test`/`dependency-scan`
+identically and blocking `docker-build`/`image-scan` from ever starting. Checked why rather than
+just reverting: `gh api /repos/astral-sh/setup-uv/tags` shows this repo doesn't publish a bare `v9`
+major alias at all (only exact tags like `v9.0.0`, `v8.3.2` — unlike the other nine actions, which
+all do). Fixed to the exact tag `astral-sh/setup-uv@v9.0.0`. Given this surprise, proactively
+re-verified all nine *other* bumped actions actually have their bare major alias (not just assumed
+"it worked for the ones I checked") — confirmed all nine genuinely do via the same `gh api` check;
+`setup-uv` was the one real outlier, not a sign the others were guessed. Pushed; not yet re-verified.
+
 ## Current position
 
 | | |

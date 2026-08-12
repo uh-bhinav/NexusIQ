@@ -140,7 +140,7 @@ jobs:
           done
           kill "$SPRING_PID"
           wait "$SPRING_PID" 2>/dev/null || true
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: ai-service/uv.lock
@@ -220,7 +220,7 @@ jobs:
             -Dflyway.url="jdbc:postgresql://localhost:5434/nexusiq" \
             -Dflyway.user=nexusiq \
             -Dflyway.password="${CI_POSTGRES_PASSWORD}"
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: ai-service/uv.lock
@@ -284,7 +284,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
         if: needs.changes.outputs.ai_service == 'true' || needs.changes.outputs.shared == 'true'
         with:
           enable-cache: true
