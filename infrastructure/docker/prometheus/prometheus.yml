@@ -1,0 +1,28 @@
+# NexusIQ Prometheus scrape config (ADR-007, docs/OPERATIONS/OBSERVABILITY.md).
+#
+# Two targets:
+# - otel-collector: its prometheus exporter re-exposes Python's OTLP metrics
+#   plus the collector's own Kafka/Postgres/Redis receiver output.
+# - spring-api: scraped directly via Actuator's /actuator/prometheus — Java
+#   metrics don't need to round-trip through the collector.
+#
+# spring-api is not containerized (Phase 12 territory); it runs on the host,
+# hence host.docker.internal. Default port matches application.yml's
+# `server.port: ${API_PORT:8080}`. If a local port conflict forces a
+# different API_PORT (documented in docs/IMPLEMENTATION/STATUS.md as a known
+# environment fact on at least one dev machine), override the target below
+# to match.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: spring-api
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]

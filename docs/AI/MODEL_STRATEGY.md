@@ -53,8 +53,21 @@ Configuration, never hardcoded:
 | `decision` | `LLM_MODEL_HEAVY` | Synthesis — the highest-stakes output |
 | `validator` | `LLM_MODEL_HEAVY` | Adversarial checking of the above |
 
-Defaults: `gemini-2.5-flash` / `gemini-2.5-pro`. **Verify current model IDs against the provider's
-documentation when implementing Phase 4 — do not trust an ID copied from a plan.**
+Defaults: `gemini-2.5-flash` / `gemini-3.6-flash`. `gemini-2.5-flash` was **verified live in Phase 4
+(2026-08-11)** against the Gemini API's `models.list()` and `ai.google.dev/gemini-api/docs/pricing`:
+current, no deprecation notice, and meaningfully cheaper than the newer `gemini-3.5-flash`
+($0.30/$2.50 vs $1.50/$9.00 per 1M input/output tokens) — the right trade for a $0-recurring-cost
+project's fast/classification tier (ADR-010).
+
+`LLM_MODEL_HEAVY` was originally `gemini-2.5-pro` (chosen in Phase 4 on the reasoning that a
+withdrawn-without-notice preview model was the risk to avoid, so a GA model was picked instead).
+**That reasoning had it backwards**: `gemini-2.5-pro` itself returned `404 "no longer available to
+new users"` on a live call during Phase 5 (2026-08-11) — still listed in `models.list()` and still
+on the public pricing page, but rejected for this specific API key/project regardless. `models.list()`
+and the pricing page are **not sufficient verification** that a model id is actually callable by a
+given key; only a real `generateContent` call proves that. Re-pinned to `gemini-3.6-flash`, verified
+the same way (a real call, not just a listing) on 2026-08-11 — see `llm/pricing.py` for its dated
+pricing entry. Re-verify with a live call, not just a listing, if this is ever revisited.
 
 This split is a hypothesis, not a fact. Phase 10's A/B run tests it and the outcome is recorded
 with numbers.

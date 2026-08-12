@@ -1,0 +1,20 @@
+# NexusIQ Grafana datasource provisioning (ADR-007). Never click-configured —
+# the stack must be reproducible from a clean checkout.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false

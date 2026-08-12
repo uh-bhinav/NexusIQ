@@ -117,15 +117,25 @@ evidence, and evidence may support several findings.
 `REJECT`,`INSUFFICIENT_INFORMATION`) · `reasoning_summary` TEXT · `confidence` NUMERIC CHECK (0–1) ·
 `risk_level` CHECK (`LOW`,`MEDIUM`,`HIGH`,`CRITICAL`) · `evidence_coverage` NUMERIC ·
 `validation_passed` BOOL · `validation_details` JSONB · `requires_human_approval` BOOL NOT NULL ·
-`escalation_reasons` TEXT[] · `required_actions` TEXT[] · `final_status` CHECK (`PENDING`,
+`escalation_reasons` TEXT[] · `required_actions` TEXT[] · `conditions` TEXT[] ·
+`unresolved_questions` TEXT[] · `final_status` CHECK (`PENDING`,
 `AUTO_APPROVED`,`HUMAN_APPROVED`,`HUMAN_REJECTED`) · `created_at`.
 
 `requires_human_approval` and `escalation_reasons` are written by the **deterministic gate in
-Java** (ADR-006), never copied from model output.
+Java** (ADR-006), never copied from model output. `conditions` (CONDITIONAL_APPROVAL specifics)
+and `unresolved_questions` (follow-up for a human reviewer) were added in Phase 5, past this
+document's original design — `docs/AI/AGENTS.md`'s `Recommendation` schema produces them as
+fields distinct from `required_actions`, and dropping them would lose real information.
 
 ### `approvals`
-`id` · `decision_id` FK · `workspace_id` FK · `assigned_role` · `approver_id` FK NULLABLE ·
-`status` CHECK (`PENDING`,`APPROVED`,`REJECTED`) · `comment` · `created_at` · `resolved_at`.
+`id` · `workspace_id` FK NOT NULL · `decision_run_id` FK NOT NULL UNIQUE (one approval per run,
+sibling of `decisions` under `decision_runs` — not a child of `decisions`) · `status` CHECK
+(`PENDING`,`APPROVED`,`REJECTED`) · `reasons` TEXT[] (the gate's own triggers, copied at creation
+time) · `requested_at` · `resolved_by` FK users NULLABLE · `resolved_at` NULLABLE ·
+`resolution_notes` NULLABLE. No `assigned_role` column — "who may act" is a role check
+(`APPROVER`/`ADMIN`) at request time, not a per-row assignment. Written only by Java
+(`ApprovalGate`/`ApprovalService`, ADR-006); the deterministic gate reads `decision.completed`'s
+validated fields, never a model-produced boolean.
 
 ### `audit_events` *(append-only)*
 `id` · `workspace_id` FK NULLABLE (null for global events like login) · `actor_id` FK NULLABLE ·
@@ -146,7 +156,8 @@ documents ──< knowledge_sources
 documents ──> documents (supersedes)
 workspaces ──< decision_requests ──< decision_runs ──< agent_executions
                                           ├──< evidence >──< findings
-                                          └──1 decisions ──< approvals
+                                          ├──1 decisions
+                                          └──1 approvals (only when the gate escalates)
 workspaces ──< audit_events
 ```
 
@@ -166,7 +177,7 @@ CREATE INDEX idx_runs_request               ON decision_runs (decision_request_i
 CREATE INDEX idx_agent_exec_run             ON agent_executions (decision_run_id, sequence_index);
 CREATE INDEX idx_evidence_run               ON evidence (decision_run_id);
 CREATE INDEX idx_findings_run               ON findings (decision_run_id);
-CREATE INDEX idx_approvals_status           ON approvals (status, created_at DESC);
+CREATE INDEX idx_approvals_ws_status        ON approvals (workspace_id, status, requested_at DESC);
 CREATE INDEX idx_audit_ws_time              ON audit_events (workspace_id, occurred_at DESC);
 CREATE INDEX idx_audit_resource             ON audit_events (resource_type, resource_id);
 ```

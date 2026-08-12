@@ -38,8 +38,10 @@ dist/
 build/
 
 # ---- Model / embedding caches (large, reproducible) ----
+# /models/ anchored to repo root — unanchored, it matched the real source
+# package ai-service/app/models/ (same bug as /storage/ above, same fix).
 .cache/
-models/
+/models/
 .huggingface/
 sentence-transformers/
 
@@ -53,9 +55,14 @@ yarn-error.log*
 pnpm-debug.log*
 
 # ---- Local runtime data ----
-data/
-storage/
-uploads/
+# Anchored to the repo root (leading /): unanchored patterns match a
+# directory of this name ANYWHERE in the tree, which silently swallowed the
+# real source package backend/spring-api/.../document/storage/ — confirmed
+# via `git check-ignore -v`, the files existed on disk but `git status` never
+# saw them.
+/data/
+/storage/
+/uploads/
 logs/
 *.log
 docker-compose.override.yml

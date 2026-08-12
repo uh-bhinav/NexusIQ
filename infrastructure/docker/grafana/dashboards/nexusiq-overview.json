@@ -1,0 +1,195 @@
+{
+  "id": null,
+  "uid": "nexusiq-overview",
+  "title": "NexusIQ Overview",
+  "description": "Phase 8 (ADR-007) observability dashboard: business, AI quality, AI cost/latency, infrastructure. Provisioned read-only from infrastructure/docker/grafana/dashboards/ — never click-configured. Every metric name below (including the exact Micrometer/OTel Prometheus-exporter suffixes: decisions_processed_total unchanged, decisions_by_recommendation_total, approval_turnaround_seconds_{count,sum,max}, nexusiq_agent_duration_milliseconds_{bucket,sum,count}, nexusiq_llm_tokens_total, nexusiq_llm_cost_usd_total, nexusiq_*_total for the remaining counters) was confirmed against a real live run: a real decision submitted through the real HTTP API, processed end to end (Kafka -> ai-service LangGraph -> Kafka -> Java persistence), escalated to human approval, approved, with the resulting metrics observed directly in Prometheus and via Grafana's own datasource-proxy query API.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["nexusiq", "phase-8"],
+  "panels": [
+    { "id": 100, "type": "row", "title": "Business", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "id": 1, "type": "timeseries", "title": "Decisions processed (by status)",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(decisions_processed_total[$__rate_interval])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 2, "type": "piechart", "title": "Recommendation split",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(decisions_by_recommendation_total[$__range])) by (recommendation)", "legendFormat": "{{recommendation}}" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Escalation rate (share of decisions requiring human approval)",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(decisions_processed_total{status=\"escalated\"}[$__rate_interval])) / sum(rate(decisions_processed_total[$__rate_interval]))", "legendFormat": "escalated" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Approval turnaround (p50 / avg, by outcome)",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "rate(approval_turnaround_seconds_sum[$__rate_interval]) / rate(approval_turnaround_seconds_count[$__rate_interval])", "legendFormat": "avg {{outcome}}" }
+      ]
+    },
+    {
+      "id": 5, "type": "stat", "title": "Decisions processed (last 24h)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(decisions_processed_total[24h]))" }
+      ]
+    },
+
+    { "id": 200, "type": "row", "title": "AI quality", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "collapsed": false },
+    {
+      "id": 10, "type": "histogram", "title": "Decision confidence distribution",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase({__name__=~\"nexusiq_decision_confidence_bucket\"}[$__range])) by (le)", "legendFormat": "{{le}}", "format": "heatmap" }
+      ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Validation failure rate (by check)",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(nexusiq_validation_failure_rate_total[$__rate_interval])) by (check)", "legendFormat": "{{check}}" }
+      ]
+    },
+    {
+      "id": 12, "type": "stat", "title": "PROMPT_INJECTION_ATTEMPT findings (last 24h)",
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 1 }
+      ] } }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(increase(nexusiq_injection_detected_count_total[24h]))" }
+      ]
+    },
+    {
+      "id": 13, "type": "stat", "title": "Zero-result retrievals (last 24h)",
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(nexusiq_retrieval_empty_count_total[24h]))" }
+      ]
+    },
+
+    { "id": 300, "type": "row", "title": "AI cost / latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }, "collapsed": false },
+    {
+      "id": 20, "type": "timeseries", "title": "Estimated LLM cost (USD/hr, by model)",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(nexusiq_llm_cost_usd_total[$__rate_interval])) by (model) * 3600", "legendFormat": "{{model}}" }
+      ]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "LLM tokens/sec (by model, direction)",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(nexusiq_llm_tokens_total[$__rate_interval])) by (model, direction)", "legendFormat": "{{model}} {{direction}}" }
+      ]
+    },
+    {
+      "id": 22, "type": "timeseries", "title": "Per-agent latency, p50 / p95",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(nexusiq_agent_duration_milliseconds_bucket[$__rate_interval])) by (le, agent_name))", "legendFormat": "p50 {{agent_name}}" },
+        { "expr": "histogram_quantile(0.95, sum(rate(nexusiq_agent_duration_milliseconds_bucket[$__rate_interval])) by (le, agent_name))", "legendFormat": "p95 {{agent_name}}" }
+      ]
+    },
+
+    { "id": 400, "type": "row", "title": "Infrastructure", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }, "collapsed": false },
+    {
+      "id": 30, "type": "timeseries", "title": "HTTP request latency, p95 (spring-api)",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{job=\"spring-api\"}[$__rate_interval])) by (le, uri))", "legendFormat": "{{uri}}" }
+      ]
+    },
+    {
+      "id": 31, "type": "timeseries", "title": "HTTP error rate (5xx, spring-api)",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-api\", status=~\"5..\"}[$__rate_interval])) by (uri)", "legendFormat": "{{uri}}" }
+      ]
+    },
+    {
+      "id": 32, "type": "timeseries", "title": "Kafka consumer lag (by consumer group, topic)",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "nexusiq_kafka_consumer_group_lag_ratio{group=~\"nexusiq-.*\", topic!~\".*\\\\.dlq\"}", "legendFormat": "{{group}} / {{topic}}-{{partition}}" }
+      ]
+    },
+    {
+      "id": 33, "type": "timeseries", "title": "DLQ depth (offset on *.dlq topics)",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "nexusiq_kafka_partition_current_offset_ratio{topic=~\".*\\\\.dlq\"}", "legendFormat": "{{topic}}-{{partition}}" }
+      ]
+    },
+    {
+      "id": 34, "type": "timeseries", "title": "Postgres commits/rollbacks per sec",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(nexusiq_postgresql_commits_total[$__rate_interval]))", "legendFormat": "commits/s" },
+        { "expr": "sum(rate(nexusiq_postgresql_rollbacks_total[$__rate_interval]))", "legendFormat": "rollbacks/s" }
+      ]
+    },
+    {
+      "id": 35, "type": "stat", "title": "Postgres active backends",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(nexusiq_postgresql_backends)" }
+      ]
+    },
+    {
+      "id": 36, "type": "timeseries", "title": "Redis cache hit ratio",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(nexusiq_redis_keyspace_hits_total[$__rate_interval])) / (sum(rate(nexusiq_redis_keyspace_hits_total[$__rate_interval])) + sum(rate(nexusiq_redis_keyspace_misses_total[$__rate_interval])))", "legendFormat": "hit ratio" }
+      ]
+    },
+    {
+      "id": 37, "type": "timeseries", "title": "Redis memory used",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "expr": "nexusiq_redis_memory_used_bytes", "legendFormat": "used" }
+      ]
+    }
+  ]
+}

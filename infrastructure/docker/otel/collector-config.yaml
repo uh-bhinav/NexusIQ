@@ -1,8 +1,11 @@
-# NexusIQ OpenTelemetry Collector — Phase 0 configuration.
+# NexusIQ OpenTelemetry Collector (ADR-007, docs/OPERATIONS/OBSERVABILITY.md).
 #
-# Accepts OTLP from spring-api and ai-service and logs it. Phase 8 extends this
-# with Jaeger/Tempo (traces) and Prometheus (metrics) exporters. See ADR-007 and
-# docs/OPERATIONS/OBSERVABILITY.md.
+# Traces: OTLP in from spring-api + ai-service -> Jaeger (v2, OTLP-native).
+# Metrics: OTLP in (Python's app-level counters/histograms) *and* three
+# contrib receivers scraping Kafka/Postgres/Redis directly -> a prometheus
+# exporter that Prometheus scrapes. Real infrastructure metrics (consumer
+# lag, DB latency, cache stats) with zero application instrumentation —
+# the receivers talk to the brokers/DB/cache themselves.
 
 receivers:
   otlp:
@@ -11,6 +14,33 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+
+  # Consumer lag per group/topic/partition — this is what "consumer lag is
+  # visible" (roadmap Phase 8 acceptance criterion 4) actually means.
+  kafkametrics:
+    brokers: ["kafka:9092"]
+    protocol_version: "3.6.0"
+    scrapers: [brokers, topics, consumers]
+    collection_interval: 15s
+
+  # Query/connection/latency stats direct from Postgres's own stats views.
+  postgresql:
+    endpoint: postgres:5432
+    transport: tcp
+    username: "${env:POSTGRES_USER}"
+    password: "${env:POSTGRES_PASSWORD}"
+    databases:
+      - "${env:POSTGRES_DB}"
+    collection_interval: 15s
+    tls:
+      insecure: true
+
+  # Hit/miss counters, memory, connected clients — the "cache hit ratio"
+  # metric's infrastructure half (the app-level retrieval cache_hit signal
+  # is a separate, app-emitted metric — see ai-service/app/observability).
+  redis:
+    endpoint: redis:6379
+    collection_interval: 15s
 
 processors:
   batch:
@@ -22,11 +52,18 @@ processors:
     spike_limit_mib: 64
 
 exporters:
-  # Phase 0: prove the pipeline works. Replaced by Jaeger/Tempo + Prometheus in
-  # Phase 8. `detailed` prints span/metric contents, not just counts, which is
-  # what makes the pipeline verifiable (and useful while instrumenting).
   debug:
     verbosity: detailed
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Kafka/Postgres/Redis receiver metric names don't carry a namespace by
+    # default; this keeps them visually grouped in Prometheus/Grafana next
+    # to the app-emitted ones without colliding.
+    namespace: nexusiq
 
 extensions:
   health_check:
@@ -38,11 +75,11 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [otlp/jaeger, debug]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, kafkametrics, postgresql, redis]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [prometheus, debug]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch]

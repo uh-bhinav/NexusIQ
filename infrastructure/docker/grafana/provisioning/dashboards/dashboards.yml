@@ -1,0 +1,15 @@
+# Points Grafana at the dashboard JSON directory (mounted read-only at
+# /etc/grafana/dashboards in docker-compose.yml). ADR-007.
+
+apiVersion: 1
+
+providers:
+  - name: NexusIQ
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

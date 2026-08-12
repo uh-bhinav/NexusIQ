@@ -51,6 +51,27 @@ unsupported-fact detection. These catch what rules cannot, and are themselves sc
 Deterministic checks run first and are decisive — the validator model is a second opinion, never
 the only one.
 
+### Implementation notes (Phase 6)
+
+- **`evidence_coverage`** is computed deterministically, not estimated by the LLM: (policy
+  findings with ≥1 `evidence_ids` + risk factors with ≥1 `evidence_ids`) ÷ (total findings +
+  total factors). Findings/factors are the system's own structured claims, each already required
+  to carry `evidence_ids` — counting those directly is more reliable than asking a model to
+  estimate coverage over free prose.
+- **`CONTRADICTION` has a deterministic pre-check that overrides the LLM's own opinion when it
+  fires**: any `VIOLATED` policy finding alongside an `APPROVE`/`CONDITIONAL_APPROVAL`
+  recommendation fails the check regardless of what the model says — this is also the concrete
+  "unsafe recommendation" output guardrail.
+- **`COMPLETENESS` failures escalate immediately rather than retry.** A required domain the
+  context planner never queried can't be fixed by re-running `decision` with the same findings —
+  retrying would fail identically and waste an iteration. Every other failure retries (capped at
+  `MAX_AGENT_ITERATIONS`) before escalating.
+- **`recommended_action` is computed in Python, never trusted from the LLM** — it drives graph
+  routing (retry vs. escalate vs. accept), so it must be deterministic (CLAUDE.md non-negotiable
+  #1). The validator's LLM call only judges the four checks that need reading comprehension
+  (`EVIDENCE_GROUNDING`, `CONTRADICTION`'s non-structural half, `HALLUCINATION`,
+  `CONFIDENCE_JUSTIFICATION`); `CITATION_VALIDITY` and `COMPLETENESS` are pure Python.
+
 ## Layer 4 — Workflow
 
 | Budget | Env | On breach |

@@ -18,6 +18,7 @@ in a code review, or in six months when the reasoning has evaporated.
 | [008](ADR-008-llm-provider-strategy.md) | Gemini as default LLM behind a provider abstraction | Accepted | 2026-08-09 |
 | [009](ADR-009-local-embeddings.md) | Local bge-small-en-v1.5 embeddings | Accepted | 2026-08-09 |
 | [010](ADR-010-local-first-zero-cost-deployment.md) | Local-first, $0-recurring-cost deployment | Accepted | 2026-08-09 |
+| [011](ADR-011-document-extraction-libraries.md) | `pdfplumber` for PDF, `python-docx` for DOCX | Accepted | 2026-08-10 |
 
 ## When to write an ADR
 

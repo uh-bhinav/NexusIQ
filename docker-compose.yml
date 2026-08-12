@@ -159,23 +159,98 @@ services:
 
   # ------------------------------------------------------------------
   # OpenTelemetry Collector (ADR-007).
-  # Phase 0: receives OTLP and logs it. Phase 8 adds Jaeger + Prometheus.
+  # Phase 8: fans traces out to Jaeger and metrics out to Prometheus
+  # (via its own prometheus exporter, scraped below), and scrapes Kafka/
+  # Postgres/Redis directly via contrib receivers — real infrastructure
+  # metrics (consumer lag, DB latency, cache stats) with zero application
+  # instrumentation.
   # ------------------------------------------------------------------
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.158.0
     container_name: nexusiq-otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otel/config.yaml"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexusiq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-nexusiq}
     volumes:
       - ./infrastructure/docker/otel/collector-config.yaml:/etc/otel/config.yaml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${OTEL_GRPC_PORT:-4327}:4317"      # OTLP gRPC
       - "${OTEL_HTTP_PORT:-4328}:4318"      # OTLP HTTP
       - "${OTEL_HEALTH_PORT:-13134}:13133"  # health_check extension
+      - "${OTEL_PROMETHEUS_PORT:-8889}:8889" # Prometheus-scrapeable metrics (debug convenience)
     # No container healthcheck: the collector image is distroless — it has no
     # shell and no wget/curl, so every CMD/CMD-SHELL probe fails regardless of
     # the collector's actual state. Health is verified from the host instead
     # (scripts/verify-stack.sh hits the health_check extension on 13134).
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Jaeger v2 — trace storage + UI (ADR-007). v1 is EOL; v2 is itself an
+  # OTel Collector distribution and needs no config file for this use —
+  # in-memory storage, OTLP receiver and query UI are all sane defaults
+  # (confirmed empirically: starts clean and serves the UI with zero
+  # mounted config).
+  # ------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/jaeger:2.20.0
+    container_name: nexusiq-jaeger
+    restart: unless-stopped
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"  # Web UI
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Prometheus — metrics storage (ADR-007). Scrapes the collector's
+  # prometheus exporter (Python's OTLP metrics + the Kafka/Postgres/Redis
+  # receivers above) and spring-api's own /actuator/prometheus directly.
+  # spring-api isn't containerized (Phase 12 territory) — host.docker.internal
+  # is Docker Desktop's route to the host, same class of host-vs-container
+  # addressing this project has hit repeatedly (docs/OPERATIONS/LOCAL_DEV.md).
+  # ------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    container_name: nexusiq-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on: [otel-collector]
+    networks: [nexusiq]
+
+  # ------------------------------------------------------------------
+  # Grafana — dashboards (ADR-007). Datasources and the one dashboard are
+  # provisioned read-only from infrastructure/docker/grafana/ — never
+  # click-configured, so the stack is reproducible from a clean checkout.
+  # ------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:13.1.3
+    container_name: nexusiq-grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./infrastructure/docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/docker/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on: [prometheus, jaeger]
     networks: [nexusiq]
 
 networks:
@@ -187,3 +262,7 @@ volumes:
     name: nexusiq_postgres_data
   kafka_data:
     name: nexusiq_kafka_data
+  prometheus_data:
+    name: nexusiq_prometheus_data
+  grafana_data:
+    name: nexusiq_grafana_data

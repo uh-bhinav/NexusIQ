@@ -56,10 +56,13 @@ DELETE /workspaces/{id}/members/{userId}    (ADMIN)
 # (.claude/rules/security.md, .claude/rules/database.md). Phase 1 ships metadata
 # CRUD only (JSON body, no file content); Phase 2 upgrades POST to a real
 # multipart upload with the same URL shape.
-POST   /workspaces/{id}/documents               metadata create (Phase 1) → multipart upload (Phase 2)
+POST   /workspaces/{id}/documents               metadata create (Phase 1) → multipart upload (Phase 2 ✅)
 GET    /workspaces/{id}/documents               paginated, filter by status/type
 GET    /workspaces/{id}/documents/{documentId}
-GET    /workspaces/{id}/documents/{documentId}/chunks   paginated (citation resolution) — Phase 2
+GET    /workspaces/{id}/documents/{documentId}/chunks   paginated (citation resolution) — Phase 3, not Phase 2:
+                                                          Phase 2's 9 acceptance criteria (roadmap) are all
+                                                          about the ingestion pipeline itself; chunk retrieval
+                                                          belongs with RAG search
 DELETE /workspaces/{id}/documents/{documentId}
 
 # Knowledge search
@@ -72,11 +75,11 @@ GET    /decisions/{id}                      full result: recommendation, finding
 GET    /decisions/{id}/run                  agent executions, tokens, cost, latency
 GET    /decisions/{id}/stream               SSE live progress
 
-# Approvals
-GET    /approvals                           queue (APPROVER/ADMIN)
-GET    /approvals/{id}
-POST   /approvals/{id}/approve              {comment}
-POST   /approvals/{id}/reject               {comment}
+# Approvals (all under /workspaces/{workspaceId}/, like decisions above)
+GET    /approvals?status=PENDING            queue, any workspace member may view
+POST   /approvals/{id}/approve              {notes}          — APPROVER/ADMIN only, 403 if self-requested
+POST   /approvals/{id}/reject               {reason}         — reason required; same restrictions
+                                             409 if the approval is already resolved
 
 # Audit
 GET    /audit                               paginated, filter by workspace/actor/type/date

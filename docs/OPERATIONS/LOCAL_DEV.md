@@ -93,6 +93,14 @@ Image versions are pinned and were verified available for `linux/arm64` and `lin
   `wget`/`curl`, so every `CMD`/`CMD-SHELL` probe fails regardless of the collector's real state.
   It is probed from the host instead, by `scripts/verify-stack.sh` against the `health_check`
   extension on 13134.
+- **`make migrate` is still a Phase 1 placeholder — spring-api must boot at least once against a
+  fresh Postgres before anything else works.** Flyway runs automatically on Spring Boot startup
+  (not via a separate CLI yet — `flyway-maven-plugin` was never added), and Kafka's broker has
+  `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`, so the six `document.*` topics only exist once
+  `KafkaTopicConfig`'s `NewTopic` beans have run — which also only happens on spring-api startup.
+  On a fresh `make up`, run `cd backend/spring-api && ./mvnw spring-boot:run` once (Ctrl-C after
+  "Started NexusIqApplication") before starting `ai-service`, or its consumer will fail to
+  subscribe to a topic that doesn't exist yet.
 
 ## Make targets
 
@@ -151,7 +159,16 @@ cd frontend/web && npm run dev
 ```
 
 When running on the host, point `POSTGRES_HOST=localhost`, `POSTGRES_PORT=5434`,
-`KAFKA_BOOTSTRAP_SERVERS=localhost:29093` in your local `.env`.
+`KAFKA_BOOTSTRAP_SERVERS=localhost:29093` in your local `.env`. Also set
+`STORAGE_LOCAL_PATH` to an absolute, host-writable path (e.g. `/tmp/nexusiq-documents` —
+both services' own code defaults already use this when the variable is unset at all, but
+`.env.example`'s `/var/nexusiq/documents` is written for the container deployment and is
+**not** writable without sudo on a normal host — confirmed empirically: spring-api fails to
+start with `AccessDeniedException: /var/nexusiq` if a sourced `.env` supplies that value on
+the host). Both services must agree on this path exactly, since it's how the AI service finds
+files spring-api wrote — a relative default would silently point them at two different
+directories (backend/spring-api/ vs ai-service/), which is why both now default to the same
+absolute path in code.
 
 ## Useful commands
 

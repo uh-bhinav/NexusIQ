@@ -65,8 +65,41 @@ query → rewrite (planner) → embed → vector search (workspace-scoped)
 Cosine distance over HNSW, always with `workspace_id` in the predicate. Over-fetch
 `RETRIEVAL_TOP_K` (default 20) to leave the reranker something to work with.
 
-**Open item for Phase 3:** HNSW cannot pre-filter by tenant. Measure over-fetch + post-filter
-against partial indexes on the sample corpus and record the choice here with the numbers.
+**Decided in Phase 3: filter `workspace_id` directly in the SQL predicate; no
+Python-side over-fetch-then-post-filter, no per-tenant partial indexes.**
+
+Measured via `EXPLAIN ANALYZE` against the real local corpus (151 chunks across ~10 workspaces,
+pgvector 0.8.6):
+
+```
+Bitmap Heap Scan on document_chunks dc
+  Recheck Cond: (workspace_id = '...')
+  ->  Bitmap Index Scan on idx_document_chunks_ws_flagged
+        Index Cond: (workspace_id = '...')
+Execution Time: 0.275 ms
+```
+
+At this scale Postgres's planner doesn't touch the HNSW index at all — it uses the
+`workspace_id`-leading btree index to filter to the tenant's ~2–3 rows first, then sorts that
+tiny set by cosine distance directly (a `Sort`/quicksort, not an ANN search). The
+HNSW-cannot-pre-filter problem this item was about only bites once a *single tenant's* row count
+is large enough that a full sort of the filtered set is slower than an approximate index scan —
+we are nowhere near that yet, and it would be premature to build over-fetch/partial-index
+machinery against a corpus this small (`CLAUDE.md` non-negotiable #12).
+
+**What to reach for later, in order, when a tenant's chunk count actually makes the planner choose
+the HNSW index and post-filtering starts discarding too many of the top-K approximate matches:**
+1. **pgvector's built-in iterative index scan** (`hnsw.iterative_scan`, available since pgvector
+   0.8.0 — already the version this stack runs). This makes the HNSW scan itself fetch more
+   candidates automatically until enough survive the `workspace_id` filter, entirely inside
+   Postgres. This is the right fix for our architecture (one shared table, `workspace_id` column,
+   many tenants) — prefer it over hand-rolled over-fetch in Python.
+2. Partial indexes per tenant only if (1) proves insufficient — and even then, note
+   that partial-index-per-workspace doesn't scale to a large tenant count (one index per tenant),
+   so it's a poor fit for this system's multi-tenant model regardless.
+
+Revisit when a single workspace's chunk count is large enough (low thousands+) that `EXPLAIN
+ANALYZE` on this query stops choosing the bitmap index scan shown above.
 
 ### Stage 2 — Metadata filtering
 
@@ -80,8 +113,25 @@ against partial indexes on the sample corpus and record the choice here with the
 ### Stage 3 — Reranking
 
 `BAAI/bge-reranker-base`, local, cross-encoder over (query, chunk) pairs, keeping `RERANK_TOP_N`
-(default 8). Toggle via `RERANKER_ENABLED`; benchmark both modes in Phase 3 and record the
-latency/quality trade-off here — do not adopt it on faith.
+(default 8). Toggle via `RERANKER_ENABLED`.
+
+**Benchmarked in Phase 3**, real local corpus (151 chunks), CPU inference, models warm (first
+call after process start pays a one-time ~2–7s model-load cost that is not representative of
+steady-state — excluded below):
+
+| Query | Reranker OFF (wall) | Reranker ON (wall) | Top-3 changed? |
+|---|---|---|---|
+| "data residency requirements for EU production" | 228 ms | 654 ms | Yes — reorders across documents |
+| "vendor risk classification tiers" | 197 ms | 376 ms | Yes — top result changes document |
+| "encryption key rotation policy" | 182 ms | 527 ms | Order within same document changes |
+
+Overhead is ~200–350 ms per query on this corpus size — well inside the sub-second budget
+(`RETRIEVAL_MIN_SIMILARITY`/latency target from the roadmap). Reranker ON also applies
+`RERANK_TOP_N` (8) as a hard cap, vs. the raw `RETRIEVAL_TOP_K` (20) results returned OFF — fewer,
+better-ordered results reach context assembly. **Decision: keep `RERANKER_ENABLED=true` by
+default** — the latency cost is small at this scale and the reordering is materially different
+(not a no-op), which is what a cross-encoder is for. Re-benchmark if the corpus grows enough that
+CPU cross-encoder inference stops being sub-second (dozens of workspaces × thousands of chunks).
 
 ### Stage 4 — Threshold
 
