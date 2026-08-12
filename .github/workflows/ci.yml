@@ -102,13 +102,44 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Apply Flyway migrations (ai-service's tests read/write real tables Java owns the schema for)
+          cache: maven
+          cache-dependency-path: backend/spring-api/pom.xml
+      # Java owns Flyway *and* is the single declared owner of Kafka topic
+      # topology (broker auto-create is deliberately off,
+      # .claude/rules/architecture.md) — spring-api's KafkaTopicConfig
+      # provisions every topic as a side effect of context startup, the same
+      # way it does in local dev (this exact dependency is already
+      # documented in STATUS.md's technical debt for local dev: "Kafka
+      # topics only exist after spring-api has booted once against a fresh
+      # Postgres"). ai-service's own tests publish/consume directly against
+      # those topics, so a migrate-only step isn't enough here — confirmed
+      # by a real CI failure (11 tests failing with
+      # aiokafka.errors.UnknownTopicOrPartitionError) before this fix.
+      - name: Boot spring-api once (applies Flyway migrations + provisions Kafka topics), then stop it
         working-directory: backend/spring-api
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5434'
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ env.CI_JWT_SECRET }}
+          KAFKA_BOOTSTRAP_SERVERS: localhost:29093
+          REDIS_HOST: localhost
+          REDIS_PORT: '6380'
         run: |
-          ./mvnw -B -q flyway:migrate \
-            -Dflyway.url="jdbc:postgresql://localhost:5434/nexusiq" \
-            -Dflyway.user=nexusiq \
-            -Dflyway.password="${CI_POSTGRES_PASSWORD}"
+          ./mvnw -B -q spring-boot:run > /tmp/spring-api-boot.log 2>&1 &
+          SPRING_PID=$!
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8080/actuator/health >/dev/null 2>&1; then
+              echo "spring-api healthy — migrations applied, Kafka topics provisioned"
+              break
+            fi
+            if ! kill -0 "$SPRING_PID" 2>/dev/null; then
+              echo "spring-api exited before becoming healthy:"; cat /tmp/spring-api-boot.log; exit 1
+            fi
+            sleep 2
+          done
+          kill "$SPRING_PID"
+          wait "$SPRING_PID" 2>/dev/null || true
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true

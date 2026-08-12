@@ -256,13 +256,27 @@ Ephemeral CI secrets (`JWT_SECRET`, `POSTGRES_PASSWORD`) are generated fresh per
 (`.claude/rules/security.md`: real entropy required, the app fails startup loudly otherwise) —
 never committed, never reused across runs.
 
-**Not yet verified: an actual GitHub Actions run.** Everything above is verified locally (YAML
-parses, every referenced command has been run directly and works, all three Dockerfiles build).
-Whether the workflow behaves correctly end-to-end on GitHub's actual runners — path filtering,
-service health-check timing, cache behavior, the full acceptance criteria (green on a clean push, a
-broken commit fails the right job, total runtime < 15 min, no secret printed in a log) — is
-unverified until it actually runs there, which requires pushing to the remote. Not done without
-asking first — pushing/triggering CI is a visible, run-consuming action distinct from local commits.
+**Ran on GitHub Actions for real** (asked and got explicit sign-off before pushing — run
+[31582788658](https://github.com/uh-bhinav/NexusIQ/actions/runs/31582788658)). Result: 6 of 9 jobs
+passed on the first try (`changes`, `evaluate`, `backend-unit`, `dependency-scan`, `frontend-test`,
+`backend-integration`) — a genuinely strong first run. `ai-service-test` failed after ~18 minutes:
+11 tests in `tests/messaging/test_consumer.py`/`test_decision_consumer.py` hit
+`aiokafka.errors.UnknownTopicOrPartitionError`. Root cause, confirmed from the actual failure logs
+rather than guessed: the job's Kafka-setup step only ran `flyway:migrate` (schema), but Java is also
+the single declared owner of Kafka topic topology (`KafkaTopicConfig`, broker auto-create
+deliberately off, `.claude/rules/architecture.md`) — topics only exist once spring-api has actually
+booted, which is the exact same gap already recorded in this file's own technical debt table for
+**local** dev ("Kafka topics only exist after spring-api has booted once against a fresh Postgres").
+Every local test run all session long silently depended on spring-api having already been started
+manually at some earlier point against the same long-lived local Kafka broker — CI's genuinely fresh
+Kafka container had never had that happen, so the topics really didn't exist. Fixed: replaced the
+migrate-only step in `ai-service-test` with one that boots spring-api in the background, polls
+`/actuator/health` until it's up (Flyway + Kafka topic provisioning both happen as side effects of
+context startup), then stops it — `docker-build`/`image-scan` never ran (blocked on
+`ai-service-test`), so this needs a second push to confirm both the fix and the full pipeline
+end-to-end. `evaluate` did **not** need the same fix and was deliberately left alone: Phase 10's
+harness calls `build_graph`/`ainvoke` directly in-process by design, never touching Kafka at all —
+confirmed by re-reading its own module docstring before assuming the same patch applied there too.
 
 ## Current position
 
@@ -1716,7 +1730,7 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
 | Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
 | Docker builds | spring-api ✅ (468MB), frontend ✅ (93MB), ai-service ✅ (built + inspected successfully twice this session; a later rebuild hit Docker Desktop's own disk ceiling from cumulative session testing — not a Dockerfile defect, see Phase 11 entry) |
-| CI (`.github/workflows/ci.yml`) | Written, YAML-valid, every referenced command individually verified to work locally — **not yet run on GitHub Actions** (requires a push; not done without asking first) |
+| CI (`.github/workflows/ci.yml`) | Ran for real on GitHub Actions (run 31582788658): 6/9 jobs passed first try, `ai-service-test` failed on a real Kafka-topic-provisioning gap (fixed, not yet re-verified), `docker-build`/`image-scan` never ran (blocked on it) |
 
 ## Environment facts (verified 2026-08-10)
 

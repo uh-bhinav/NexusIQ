@@ -40,20 +40,23 @@ Phase 11 progress (2026-08-12):
       was tried (a `[tool.uv.sources]` CPU-only torch pin, which didn't work — a real uv 0.8.4
       behavior, not a mistake) and why it's deliberately deferred to Phase 12 ("slim" is Phase 12's
       own acceptance criterion). **Not yet committed.**
-- [x] `.github/workflows/ci.yml` — `changes` (path-filter) → `backend-unit`/`backend-integration`
-      → `ai-service-test` (real Postgres/Kafka/Redis via the existing `docker-compose.yml`, Flyway-
-      migrated, mock LLM) → `frontend-test` → `evaluate` (Phase 10's harness, mock provider) →
-      `docker-build` (matrix ×3, no push — `$0` infra) → `dependency-scan` (`pip-audit`/`npm audit`/
-      OWASP dependency-check, all non-blocking pending a CVE-triage process) → `image-scan` (Trivy
-      ×3, also non-blocking for the same reason). Every command in it has been run directly and
-      confirmed to work; the workflow YAML itself parses correctly. **Not yet run on GitHub
-      Actions** — needs a push, which needs the user's explicit sign-off first (see STATUS.md's
-      Phase 11 entry). **Not yet committed.**
-- [ ] Branch protection requiring the pipeline to pass before merge (needs at least one real run
-      first to know the check names).
-- [ ] Verify acceptance criteria against a real run once pushed: green on a clean push; a
-      deliberately broken commit fails the right job; total runtime < 15 min; secret scanning
-      enabled; no secret ever printed in a log (check workflow logs directly).
+- [x] `.github/workflows/ci.yml` built and committed (`72ecd6e`), pushed with sign-off, ran for
+      real (run `31582788658`): **6/9 jobs passed first try** (`changes`, `evaluate`, `backend-unit`,
+      `dependency-scan`, `frontend-test`, `backend-integration`). `ai-service-test` failed — 11
+      Kafka-messaging tests hit `UnknownTopicOrPartitionError` because the job only ran Flyway
+      migrations, not a full spring-api boot, and Java also owns Kafka topic provisioning (broker
+      auto-create is off). Same gap already known for local dev (STATUS.md's technical debt table);
+      CI's genuinely-fresh Kafka container was the first environment to actually expose it. Fixed:
+      the job now boots spring-api in the background and polls `/actuator/health` before running
+      pytest. `docker-build`/`image-scan` never ran (blocked on `ai-service-test`). See STATUS.md's
+      Phase 11 entry for the full trace. **Fix implemented, not yet re-verified with a second push.**
+- [ ] Push the Kafka-topic-provisioning fix and confirm `ai-service-test` passes, then confirm
+      `docker-build`/`image-scan` (never ran yet) also pass.
+- [ ] Branch protection requiring the pipeline to pass before merge (needs a fully green run first
+      to know the final check names).
+- [ ] Verify remaining acceptance criteria against a fully green run: a deliberately broken commit
+      fails the right job; total runtime < 15 min; secret scanning enabled; no secret ever printed
+      in a log (check workflow logs directly).
 
 ### Backlog (low-priority, not phase-blocking)
 
