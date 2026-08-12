@@ -132,5 +132,13 @@ lint: ## Run all linters
 	if [ -f frontend/web/package.json ]; then (cd frontend/web && npm run lint) || exit 1; ran=1; fi; \
 	[ $$ran -eq 1 ] || echo -e "$(Y)Nothing to lint yet.$(N)"
 
-eval: ## Run the AI evaluation harness (Phase 10)
-	@echo -e "$(Y)Not available yet — the evaluation harness arrives in Phase 10.$(N)"
+eval: ## Run the AI evaluation harness (Phase 10). PROVIDER=mock|gemini (default mock), CASE=EVAL-007 for a single case
+	@set -a && . ./$(ENV_FILE) && set +a && \
+	cd ai-service && \
+	POSTGRES_HOST=localhost POSTGRES_PORT=$${POSTGRES_EXPOSED_PORT:-5434} \
+	KAFKA_BOOTSTRAP_SERVERS=$${KAFKA_EXTERNAL_BOOTSTRAP:-localhost:29093} \
+	REDIS_HOST=localhost REDIS_PORT=$${REDIS_EXPOSED_PORT:-6380} \
+	OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:$${OTEL_GRPC_PORT:-4327} \
+	NEXUSIQ_ENV=local STORAGE_LOCAL_PATH=/tmp/nexusiq-documents \
+	uv run python -m app.evaluation.harness \
+	  --provider $${PROVIDER:-mock} $${CASE:+--case $$CASE}

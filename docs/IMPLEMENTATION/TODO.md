@@ -30,15 +30,23 @@ the full history (kept there per this file's own "delete completed items" conven
       Testcontainers — see its module docstring). Required a small `MOCK_FIXTURES_DIR` setting +
       a dedicated `llm_e2e_escalate` fixture set so the escalate/approve branch is reachable
       deterministically (the default mock fixtures always cleanly auto-approve). `make test-e2e`
-      added. See STATUS.md's Phase 10 entry for the full detail. **Not yet committed.**
+      added. See STATUS.md's Phase 10 entry for the full detail. **Committed as `487ebff`.**
+- [x] Evaluation harness + 30 labelled cases. `ai-service/app/evaluation/` (`models.py`,
+      `metrics.py`, `corpus.py`, `harness.py`) + `app/evaluation/datasets/cases.json`, hitting every
+      category minimum from `docs/AI/EVALUATION.md` exactly. `make eval` added. 19 dedicated unit
+      tests for the metrics functions (`tests/evaluation/test_metrics.py`). Ran once against the
+      mock provider: 30/30 cases, 0 errors — confirms the harness is correct, but this is a **smoke
+      test only, not a quality baseline** (mock's fixtures are fixed regardless of the question
+      asked — verified empirically, not assumed). See STATUS.md's Phase 10 entry for the full
+      detail. **Not yet committed.**
 - [ ] Close remaining coverage gaps in all three services (Java/Python/frontend) — identify what's
       genuinely untested first, don't pad numbers.
-- [ ] Evaluation harness + ≥30 labelled cases in `ai-service/evaluation/datasets/` (clean approval,
-      conditional approval, rejection, unknown, conflicting versions, no evidence, injection,
-      out-of-scope) — corpus is now ready (see above); this is also where spec §8 step 7 (data
-      residency `UNKNOWN`) finally gets a corpus that can produce it.
-- [ ] Baseline report → `docs/AI/EVALUATION_BASELINE.md`.
-- [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded.
+- [ ] **Get explicit user sign-off before spending real Gemini quota**, then run `make eval
+      PROVIDER=gemini` for the actual quality baseline (~150–180 real LLM calls for all 30 cases —
+      well beyond a "a few calls" ask and the ~20-requests/day free-tier quota; may need to spread
+      across days or start with a subset). Then write `docs/AI/EVALUATION_BASELINE.md`.
+- [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded (same
+      quota consideration as above — roughly doubles the real-LLM-call cost).
 
 ### Backlog (low-priority, not phase-blocking)
 

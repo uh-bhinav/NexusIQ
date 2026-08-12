@@ -6,7 +6,7 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 10 in progress.** Two pieces landed this session.
+**Last verified:** 2026-08-12 — **Phase 10 in progress.** Three pieces landed this session.
 
 (1) Audited all 14 named failure-scenario tests from `.claude/rules/testing.md`: 9 were already
 covered, 5 were gaps (#2 contradictory documents, #3 two policy versions, #6 LLM timeout retry, #9
@@ -39,8 +39,61 @@ document content. `make test-e2e` added (checks both services are reachable firs
 not — this suite is deliberately not part of `make test`, which is fully hermetic/Testcontainers-
 managed and requires nothing pre-running; see `docs/TESTING/STRATEGY.md`'s "few E2E tests"
 guidance). Live-run twice for repeatability, confirmed passing both times; full `pytest` (189/189,
-unaffected by the config change) rerun afterward as a regression check. **Implemented and verified
-but not yet committed** — see "Recommended next action".
+unaffected by the config change) rerun afterward as a regression check. **Committed as `487ebff`.**
+
+(3) Built the AI evaluation harness (`docs/AI/EVALUATION.md`): `ai-service/app/evaluation/`
+(`models.py`, `metrics.py`, `corpus.py`, `harness.py`) + a 30-case labelled dataset
+(`app/evaluation/datasets/cases.json`) hitting every category minimum from EVALUATION.md's table
+exactly (4 clean approval, 4 conditional approval, 4 rejection, 5 unknown/missing evidence, 3
+conflicting versions, 3 no relevant evidence, 3 prompt injection, 2 out-of-scope, 2 ambiguous — 30
+total). Every case's `expected` block is grounded in the actual content of the rebuilt
+`docs/sample-enterprise/` corpus (read all 10 documents directly rather than guessing), including
+several deliberately adversarial ones designed to catch a specific plausible failure — e.g.
+EVAL-019 asks about the current incident-notification window specifically because Security Policy
+v2's own text mentions "72 hours" twice (once as its *own*, superseded-in-v1 value, once in
+reference to GDPR Article 33's regulator deadline) while its real answer is 4 hours, testing whether
+the system conflates the two; EVAL-011 checks that Vendor Gamma's rejection is correctly attributed
+to the data-residency violation, not the RTO/RPO gap that was noted but explicitly wasn't the
+deciding factor in the historical record.
+
+The harness (`corpus.py::seed_eval_corpus`) seeds a dedicated evaluation workspace via the real
+extract → chunk → embed → store pipeline (not a hand-typed paragraph — same ingestion code path
+production uses, just called directly instead of through Kafka), then runs every case straight
+through `build_graph`/`ainvoke` (same in-process pattern as ai-service's own
+`tests/graph/test_end_to_end.py` — no spring-api/Kafka round trip needed for an offline batch tool).
+Metrics (`metrics.py`) are pure functions with **19 dedicated unit tests**
+(`tests/evaluation/test_metrics.py`, 0.05s) — retrieval (recall@5/@10, precision@5, MRR, computed
+by mapping each retrieved chunk's `document_id` back to its corpus slug), generation (groundedness
+and citation-validity read directly from the validator's own real `EVIDENCE_GROUNDING`/
+`CITATION_VALIDITY` checks — not re-derived — plus a documented-as-heuristic keyword-overlap
+`must_not_claim` checker layered on top of the validator's real `HALLUCINATION` check, not
+replacing it), and decision (recommendation accuracy against an acceptable-answer *set*, per-policy
+status accuracy via fuzzy name matching, escalation precision/recall, and an added intent-
+classification accuracy metric beyond what EVALUATION.md's schema initially specified as consumed).
+
+**Ran once against the mock provider (`make eval`, free, deterministic) — 30/30 cases completed
+with zero errors, confirming the harness itself is correct.** The resulting numbers
+(`recommendation_accuracy=0.30`, `escalation_recall=0.00`, `retrieval recall@5=0.42`) are **not a
+quality baseline and must not be read as one** — this was verified directly, not assumed: `mock`'s
+`Recommendation`/`PolicyAnalysisOutput`/`RiskAssessment`/`ContextPlan`/`IntentAnalysis` fixtures are
+fixed canned JSON, identical regardless of the actual question (confirmed empirically — even
+EVAL-027's "what's the weather like today?" was classified `vendor_approval` and routed through
+full retrieval, since `MockProvider` never looks at its input). Under `mock`, every one of the 30
+cases follows the exact same intent → fixed-query retrieval → fixed-APPROVE path, so this run is
+honestly a **harness smoke test** (proves zero crashes, correct schema validation, correct metric
+computation across all 9 categories) and nothing more. A real quality baseline requires
+`LLM_PROVIDER=gemini`, where each case gets genuinely distinct reasoning — **not yet run**, since a
+full 30-case sweep is roughly 150–180 real LLM calls (multiple nodes per case), far beyond this
+session's earlier "a few calls" authorization and the documented ~20-requests/day free-tier quota
+(STATUS.md's own technical debt table). Asking the user explicitly before spending that quota rather
+than assuming — see "Recommended next action". `docs/AI/EVALUATION_BASELINE.md` deliberately not yet
+created: committing mock-provider numbers under that name would misrepresent them as the real
+baseline `docs/AI/EVALUATION.md` calls for.
+
+`make eval` added (`PROVIDER=mock|gemini`, `CASE=EVAL-007` for a single case — both wired through
+to the harness CLI). Full `ai-service` `pytest` suite rerun afterward: 208/208 (189 prior + 19 new),
+confirming zero regressions from the new `app/evaluation/` package. `ruff`/`mypy --strict` clean.
+**Implemented and verified but not yet committed** — see "Recommended next action".
 
 ## Current position
 
@@ -1484,12 +1537,12 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
 | Java unit (`*Test`, Surefire) | ✅ 72/72 (+9 `ApprovalGateTest`, new this phase — all 7 `ApprovalGate` triggers plus a clean-payload and an `INSUFFICIENT_INFORMATION` negative case) |
 | Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 34/34 |
-| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 189/189 (+9 this phase: Redis-unavailable retrieval, 5 Gemini retry/backoff, Kafka DLQ-after-3, two-policy-version context labelling, conflicting-evidence routing) |
+| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 208/208 (+9 failure-scenario gaps, +19 `tests/evaluation/test_metrics.py`) |
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
 | Frontend (`vitest`, RTL + MSW) | ✅ 44/44 |
 | Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
 | E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
-| Evaluation | No dataset yet — corpus now ready (10 docs, Phase 10 remaining work) |
+| Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
 
 ## Environment facts (verified 2026-08-10)
 
@@ -1511,16 +1564,25 @@ other stack is running.
 
 Continue Phase 10. Concretely, in roughly this order:
 
-1. **Commit the E2E test** (currently implemented and verified, but uncommitted — see the Phase 10
-   entry above): `tests/e2e/`, the `MOCK_FIXTURES_DIR` setting (`ai-service/app/config.py` +
-   `llm/factory.py`), `ai-service/tests/fixtures/llm_e2e_escalate/`, the `make test-e2e` target, and
-   `docs/OPERATIONS/LOCAL_DEV.md`'s new "E2E testing" section. (The failure-scenario-gap work and
-   `CONFLICTING_EVIDENCE` fix from earlier in this phase are already committed as `a90b626`.)
-2. **The evaluation harness** (`docs/AI/EVALUATION.md`): ≥30 labelled cases (the corpus rebuilt this
-   phase should make this concrete rather than synthetic), retrieval metrics (recall@5, recall@10,
-   precision@5, MRR), generation metrics (groundedness, citation validity, hallucination rate),
-   decision metrics (recommendation accuracy, policy-status accuracy, escalation precision/recall),
-   a baseline report, and an A/B model comparison.
+1. **Commit the evaluation harness** (currently implemented and verified, but uncommitted — see the
+   Phase 10 entry above): `ai-service/app/evaluation/` (`models.py`, `metrics.py`, `corpus.py`,
+   `harness.py`), `app/evaluation/datasets/cases.json` (30 cases), `tests/evaluation/test_metrics.py`
+   (19 tests), the `make eval` target, and the `.gitignore` entry for run output. (The E2E test and
+   the failure-scenario-gap/`CONFLICTING_EVIDENCE` work from earlier in this phase are already
+   committed as `487ebff` and `a90b626`.)
+2. **Get explicit user sign-off before spending real Gemini quota**, then run `make eval
+   PROVIDER=gemini` for the actual quality baseline — the mock-provider run above is a harness
+   correctness smoke test only, not a baseline (see the Phase 10 entry above for why: `mock`'s fixed
+   fixtures make its retrieval/decision numbers artifacts of the fixture, not of the question asked).
+   A full 30-case run is ~150–180 real LLM calls, well beyond a "a few calls" ask and the documented
+   ~20-requests/day free-tier quota — likely needs spreading across more than one day, or the user
+   may prefer a smaller subset first. Once real numbers exist, write
+   `docs/AI/EVALUATION_BASELINE.md` (date, commit, `workflow_version`, `prompt_version`, model,
+   embedding model, every metric, notes).
+3. **A/B model comparison** (`docs/AI/EVALUATION.md`): compare at least two model configurations
+   (e.g. cheap-everywhere vs the heavier model on synthesis/validation) across accuracy, latency, and
+   cost, using the harness's `--provider`/settings overrides already built. Same quota consideration
+   as above — this roughly doubles the real-LLM-call cost of step 2.
 
 Phase 8 itself is fully done, including live verification — nothing further needed there except the
 confidence-calibration technical debt from Phase 4/7 (unrelated, low priority, Phase 10 territory).

@@ -43,6 +43,10 @@ build/
 .cache/
 /models/
 .huggingface/
+
+# ---- Evaluation harness run output (transient; the baseline is
+# docs/AI/EVALUATION_BASELINE.md, committed deliberately, not every run) ----
+ai-service/app/evaluation/datasets/results/
 sentence-transformers/
 
 # ---- Node / frontend ----
