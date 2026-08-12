@@ -278,6 +278,31 @@ end-to-end. `evaluate` did **not** need the same fix and was deliberately left a
 harness calls `build_graph`/`ainvoke` directly in-process by design, never touching Kafka at all —
 confirmed by re-reading its own module docstring before assuming the same patch applied there too.
 
+**Second push, run [31590258923](https://github.com/uh-bhinav/NexusIQ/actions/runs/31590258923):**
+the Kafka-topic fix worked — `ai-service-test` passed in 3m26s (down from an 18m35s *failure*; the
+first run's failing tests were each retrying with backoff against a nonexistent topic, so removing
+that alone explains most of the time difference). All 7 non-Docker jobs passed. `docker-build` ran
+all three services for the first time: spring-api (2m33s) and frontend (1m30s) passed quickly;
+`ai-service` took **24 minutes** — genuinely just a slow, cache-cold ~8GB download on a shared
+runner, confirmed by watching `docker-build (ai-service)`'s step-level status stay `in_progress`
+with no error the entire time rather than assuming a hang. `image-scan` then failed immediately
+(2–3s each, all three) with `Unable to resolve action aquasecurity/trivy-action@0.29.0, unable to
+find version 0.29.0` — a real, self-inflicted bug: I'd pinned `0.29.0` without the `v` prefix
+`aquasecurity/trivy-action` tags actually use (`v0.29.0`, confirmed via `gh api
+/repos/aquasecurity/trivy-action/tags` rather than guessed a second time). Fixed to `v0.36.0` (also
+verified live as the current latest tag, not assumed).
+
+While fixing that, checked every other action version pin in the workflow the same way (`gh api
+/repos/<owner>/<repo>/tags` for all 10 actions used) rather than assuming the one bug was isolated —
+all ten were pinned to real but stale major versions (e.g. `actions/checkout@v4` when `v7` exists),
+and `v4`'s stack is exactly what's producing the "Node.js 20 is deprecated" warning on every single
+job in both runs so far. Bumped all ten to their current major version
+(`actions/checkout@v7`, `actions/setup-java@v5`, `actions/setup-node@v7`, `astral-sh/setup-uv@v9`,
+`actions/cache@v6`, `actions/upload-artifact@v7`, `actions/download-artifact@v8`,
+`docker/setup-buildx-action@v4`, `docker/build-push-action@v7`, `dorny/paths-filter@v4`) rather than
+leave known-stale pins that would just need fixing again soon. Not yet re-verified with a third
+push — YAML parses, but the major bumps themselves are unverified beyond that.
+
 ## Current position
 
 | | |
