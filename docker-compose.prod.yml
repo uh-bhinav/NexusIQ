@@ -1,0 +1,139 @@
+# NexusIQ — production-style overlay (Phase 12, ADR-010).
+#
+# Adds the three application services (built from their own Dockerfiles,
+# not host-mounted source) and resource limits on top of docker-compose.yml's
+# infrastructure. Always used together with the base file — never standalone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# (`make demo` does exactly this.) This is still the $0, single-machine,
+# docker-compose deployment target (ADR-010) — not a second environment.
+
+name: nexusiq
+
+services:
+  # ---- Resource limits on the infrastructure services (Compose
+  # Specification's deploy.resources.limits is honored by plain
+  # `docker compose up`, not just Swarm, as of current Compose versions).
+  # Sized for the Phase 12 target of running the full stack on 16GB. ----
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+  redis:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+  kafka:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+  otel-collector:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+  jaeger:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+  prometheus:
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+  grafana:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  # ------------------------------------------------------------------
+  # spring-api — identity, RBAC, workspaces, documents, decision
+  # lifecycle, approvals, audit, SSE. Owns Flyway; runs migrations on
+  # startup, same as host execution.
+  # ------------------------------------------------------------------
+  spring-api:
+    build:
+      context: backend/spring-api
+    container_name: nexusiq-spring-api
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - document_storage:${STORAGE_LOCAL_PATH:-/var/nexusiq/documents}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks: [nexusiq]
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # ------------------------------------------------------------------
+  # ai-service — ingestion, retrieval, LangGraph agents. Not internet-
+  # facing; only spring-api and the frontend's nginx proxy reach it.
+  # ------------------------------------------------------------------
+  ai-service:
+    build:
+      context: ai-service
+    container_name: nexusiq-ai-service
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - document_storage:${STORAGE_LOCAL_PATH:-/var/nexusiq/documents}
+    ports:
+      - "${AI_SERVICE_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks: [nexusiq]
+    deploy:
+      resources:
+        limits:
+          # torch + sentence-transformers + the loaded embedding model are
+          # the heaviest thing in this stack (STATUS.md's own technical
+          # debt notes this) — sized generously relative to the other
+          # services for exactly that reason.
+          memory: 3g
+
+  # ------------------------------------------------------------------
+  # frontend — the built static bundle behind nginx, reverse-proxying
+  # /api/ to spring-api (nginx.conf.template) so the browser never needs
+  # CORS config in production either.
+  # ------------------------------------------------------------------
+  frontend:
+    build:
+      context: frontend/web
+    container_name: nexusiq-frontend
+    restart: unless-stopped
+    environment:
+      API_PROXY_TARGET: http://spring-api:8080
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      spring-api:
+        condition: service_healthy
+    networks: [nexusiq]
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+volumes:
+  document_storage:
+    name: nexusiq_document_storage

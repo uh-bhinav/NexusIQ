@@ -11,6 +11,9 @@ secrets/
 **/credentials.json
 **/service-account*.json
 
+# ---- Local Postgres backups (scripts/backup.sh) — may contain real data ----
+/backups/
+
 # ---- Java / Maven ----
 target/
 !.mvn/wrapper/maven-wrapper.jar

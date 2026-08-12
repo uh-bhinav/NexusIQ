@@ -336,15 +336,97 @@ now fast with a warm cache). One criterion not yet demonstrated: "a deliberately
 the right job" — not tested this session; reasonable to consider Phase 11 functionally proven by the
 four real bugs this pipeline's own dependent jobs already caught and required fixing.
 
+**Phase 12 — Local deployment hardening (2026-08-12, IN PROGRESS).**
+
+Built, in order: `HEALTHCHECK` directives for all three Dockerfiles (spring-api: `wget` against
+`/actuator/health`, Alpine's BusyBox already provides `wget` so no extra package; ai-service: Python
+stdlib `urllib.request` against `/ready`, since `python:slim` has neither `curl` nor `wget` by
+default and installing one just for this felt like the wrong tradeoff; frontend: `wget` against `/`).
+`docker-compose.prod.yml` — an **overlay** file (`docker compose -f docker-compose.yml -f
+docker-compose.prod.yml up`, never standalone), adding `deploy.resources.limits.memory` to every
+existing infrastructure service and three new services (`spring-api`, `ai-service`, `frontend`)
+built from their own Dockerfiles, networked into the existing `nexusiq` network, sharing a new
+`document_storage` named volume at `STORAGE_LOCAL_PATH` (spring-api writes, ai-service reads — same
+contract as host execution). Discovered while building this that `.env.example`'s existing defaults
+(`POSTGRES_HOST=postgres`, `KAFKA_BOOTSTRAP_SERVERS=kafka:9092`, `REDIS_HOST=redis`,
+`AI_SERVICE_BASE_URL=http://ai-service:8000`) are *already* container-network-ready — confirmed by
+reading the file, not assumed — so the app containers need no per-service env overrides, just
+`env_file: .env`. Added the one genuinely new runtime var this needed, `FRONTEND_PORT`, to
+`.env.example`.
+
+`scripts/seed.sh` — uploads the full `docs/sample-enterprise/` corpus into a fixed demo workspace via
+the real spring-api REST API (the same path a real user takes, not a DB-level shortcut).
+**Idempotent**, deliberately: registers the demo user or logs in if `409 CONFLICT` (already exists);
+reuses the demo workspace by name if one's already there instead of creating a duplicate every run;
+skips any document already present by filename before uploading. Prints the demo login at the end —
+a local-only, throwaway credential, not a real secret, documented as such in the script's own header.
+`Makefile`'s `migrate`/`seed`/`demo` targets now do the real thing instead of the Phase 0–2
+placeholder stubs they'd been showing this whole project. `migrate` calls
+`check-prereqs.sh all` first rather than silently auto-exporting `JAVA_HOME` — this machine's known
+Java-8-shell-default (`CLAUDE.md`) should fail loudly here exactly like it does everywhere else in
+this project, not get quietly worked around in one specific target. `demo` chains
+`docker compose -f ... -f ... up -d --build` → wait-for-health (`_wait_full`, mirrors the existing
+`_wait` target's pattern) → `migrate` → `seed`.
+
+`scripts/backup.sh`/`scripts/restore.sh` — `pg_dump --clean --if-exists | gzip` to a timestamped file
+under `backups/` (now gitignored — dumps may contain real data); `restore.sh` requires typing `yes`
+before overwriting the running database, matching the existing destructive-action confirmation
+pattern already used by `make clean`. Deliberately scoped to the database only, not
+`document_storage`'s file blobs — noted in the script's own header why (a plain `docker cp`/tar is
+sufficient for that if ever needed; the database is what actually needs point-in-time recovery).
+`make backup`/`make restore FILE=...` added.
+
+**Made one more real, time-boxed attempt at the `ai-service` image-size problem** (torch pulling in
+~3GB of unused CUDA/nvidia packages, first hit in Phase 11) — with more time and less CI-debugging
+pressure than the first attempt. Downloaded a newer `uv` (0.12.3) to an isolated `/tmp` location
+(not touching the system install) specifically to rule out "maybe it's just a version gap"; re-tried
+the `[tool.uv.sources]` CPU-only-index pin with `--refresh` and `-v` this time. **Confirmed via the
+verbose resolver log that the pinned index is never even queried** — `uv` selects `torch==2.13.0
+[preference]` straight from the default PyPI registry regardless of the pin, reproducibly across
+both uv versions. This is now a well-characterized, real uv behavior with this specific
+transitive-dependency scenario (torch is pulled in by `sentence-transformers`, never listed
+directly), not something fixable by upgrading uv or trying the pin a third time. Reverted cleanly
+again (confirmed via `git diff` showing zero change to `pyproject.toml`/`uv.lock`). Not one of Phase
+12's 5 numbered acceptance criteria — noted as a known, real, still-open item rather than pursued
+further this session.
+
+**Attempted a live `make demo` verification and hit a genuine Docker Desktop environment failure,
+not a code defect.** `API_PORT=8180 make demo` failed immediately on `docker-build`:
+`no space left on device` during image preparation — even though `docker system df` reported only
+~21GB in use against an ~89GB allocated VM disk (`DiskSizeMiB=91553` in Docker Desktop's own
+settings file). This is a known class of macOS Docker Desktop behavior: the VM's underlying virtual
+disk file can grow from heavy churn (this session built the same ~8GB `ai-service` image close to a
+dozen times total across Phase 11/12) without automatically shrinking back down even after
+`docker builder prune -af`/`docker image prune -af`, which only reclaim space *inside* Docker's
+accounting, not the VM disk file's actual on-disk size. Tried a graceful restart (`osascript quit` +
+relaunch) — the app didn't actually quit (Docker Desktop backgrounds on the dock icon rather than
+fully exiting, a known default behavior), confirmed by unchanged process start times. Force-killed
+`com.docker.backend` directly and relaunched for a genuine cold start — the daemon came back up
+enough to accept socket connections but now returns `Internal Server Error` on every single API
+call (`docker version`, `docker info`), which is a step past "still starting up" into "the backend
+process itself is in a broken state," most plausibly because the earlier disk-exhaustion happened
+mid-write and left the containerd content store or overlay filesystem metadata inconsistent.
+
+**Stopped here rather than continuing to intervene.** The remaining fixes — Docker Desktop's own
+"Troubleshoot → Clean/Purge data" (destructive: wipes all local Docker state, not just this
+session's test images) or increasing the VM disk allocation in Settings → Resources → Advanced — are
+both real, user-facing changes to a running application's data/configuration that this session's own
+safety guidelines call out as warranting the user's explicit awareness before acting, not something
+to do autonomously mid-task. **Everything else in Phase 12 is written and locally verified as far as
+possible without a working Docker daemon**: `bash -n` on all three scripts, `python3 -c "import
+yaml..."` on `docker-compose.prod.yml`, `make -n migrate`/`make -n demo` dry-run syntax checks — all
+clean. The one thing genuinely unverified is a live end-to-end `make demo` run.
+
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 11 — CI/CD (**functionally complete**; branch protection + a deliberately-broken-commit test still open); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
+| **Current phase** | Phase 12 — Local deployment hardening (**in progress, blocked on a Docker Desktop environment issue** — see "Blocked"); Phase 11 functionally complete; Phase 10 substantially complete with 2 items deliberately deferred (see below) |
 | **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
 | **Phase 10 status** | All roadmap deliverables done except the real-Gemini evaluation baseline and A/B model comparison — both blocked on today's free-tier Gemini quota resetting. Deferred per explicit user instruction to proceed to Phase 11/12 rather than wait; will be picked up once quota allows. |
 | **Phase 11 status** | `.github/workflows/ci.yml` ran green end-to-end on GitHub Actions (run 31592814077, all 13 job instances passed) after 4 pushes, each fixing one real bug the pipeline itself surfaced. Remaining: branch protection, and an actual test that a broken commit fails the right job. |
-| **Next milestone** | Phase 12: production Dockerfile hardening (non-root — already done; slim — the `ai-service` image-size item lives here; healthchecked), `docker-compose.prod.yml`, `make demo`/`make migrate`/`make seed`, RUNBOOK, backup/restore |
+| **Phase 12 status** | Dockerfile healthchecks (×3), `docker-compose.prod.yml`, `scripts/seed.sh`/`backup.sh`/`restore.sh`, and the real `make demo`/`migrate`/`seed`/`backup`/`restore` targets are all written and locally verified as far as possible without Docker (syntax/YAML checks all clean). **Live end-to-end verification of `make demo` is blocked** on a genuine Docker Desktop daemon failure (Internal Server Error on every API call, most likely VM-disk corruption from this session's repeated large builds) — needs the user's direct attention, not something to fix autonomously. |
+| **Next milestone** | Once Docker Desktop is healthy again (user action needed): run `make demo` for real, measure the full-stack memory footprint, verify container restart/no-data-loss, verify the corpus seeds automatically — Phase 12's remaining 4 acceptance criteria |
 
 ## Completed
 
@@ -1733,7 +1815,20 @@ worth doing "if 0–12 are genuinely done." Phase 11 is in progress, not in this
 Two Phase 10 items — the real-Gemini evaluation baseline and the A/B model comparison — are blocked
 on today's free-tier Gemini quota resetting (confirmed exhausted via a real `429 RESOURCE_EXHAUSTED`
 attempt, not assumed). Deliberately not waited on; Phase 11/12 work proceeds in parallel per
-explicit user instruction. Nothing else is blocked.
+explicit user instruction.
+
+**Phase 12's live verification is blocked on a Docker Desktop environment problem, not a code
+issue.** The daemon returns `Internal Server Error` on every API call (`docker version`, `docker
+info`) even after a full force-kill + relaunch — confirmed genuinely broken, not just slow to start.
+Most likely cause: this session's repeated large (~8GB) `ai-service` image builds hit "no space left
+on device" several times across Phase 11 and 12, and at least once during an active write, which can
+leave Docker Desktop's VM disk (containerd content store / overlay filesystem) in an inconsistent
+state that a normal restart doesn't repair. **Needs the user's direct action**: Docker Desktop →
+Troubleshoot → "Clean / Purge data" (destructive — wipes all local Docker state, not just this
+session's artifacts) or increasing the VM disk allocation in Settings → Resources → Advanced, then a
+restart. Not something to do autonomously — see this session's own safety guidelines on destructive/
+system-state changes. All of Phase 12's code is written and verified as far as possible without a
+working daemon; only the live `make demo` run itself is blocked.
 
 ## Known bugs
 
@@ -1789,6 +1884,7 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
 | Docker builds | spring-api ✅ (468MB), frontend ✅ (93MB), ai-service ✅ (built + inspected successfully twice this session; a later rebuild hit Docker Desktop's own disk ceiling from cumulative session testing — not a Dockerfile defect, see Phase 11 entry) |
 | CI (`.github/workflows/ci.yml`) | ✅ Fully green on GitHub Actions — run [31592814077](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592814077), all 13 job instances passed, after 4 pushes each fixing a real bug the pipeline surfaced (Kafka topic provisioning, `trivy-action` version, `setup-uv` version) |
+| Phase 12 (`docker-compose.prod.yml`, `make demo`) | Written, YAML-valid, `bash -n`/`make -n` syntax-clean on all scripts — **not yet verified live**, blocked on a Docker Desktop daemon failure (see "Blocked") |
 
 ## Environment facts (verified 2026-08-10)
 
@@ -1813,18 +1909,20 @@ Per explicit user instruction (2026-08-12): proceed through Phase 11 and Phase 1
 deliberately deferred, not blocking.
 
 1. ~~Push and verify the CI pipeline on real GitHub Actions~~ — done. Fully green (run
-   `31592814077`) after 4 pushes, each fixing a real bug the pipeline itself surfaced: Kafka topic
-   provisioning (`ai-service-test`), a `trivy-action` version pin missing its `v` prefix, and a
-   `setup-uv` version pin with no bare major alias. See the Phase 11 entry above for the full trace.
-2. **Small Phase 11 loose ends** (optional, low-effort): add branch protection requiring the
-   pipeline to pass before merge; actually test that a deliberately-broken commit fails the right
-   job (the one Phase 11 acceptance criterion not yet demonstrated with evidence).
-3. **Start Phase 12 — Local deployment hardening**: harden the three Dockerfiles to Phase 12's own
-   bar (non-root — already done; slim — the `ai-service` image-size problem lives here, already
-   diagnosed once in the Phase 11 entry above and worth another look now with less time pressure;
-   healthchecked); `docker-compose.prod.yml`; a real `make demo`/`make migrate`/`make seed` (all
-   three are still literal Phase 0–2 placeholder stubs in the Makefile today);
-   `docs/OPERATIONS/RUNBOOK.md`; a Postgres backup/restore script.
+   `31592814077`). See the Phase 11 entry above for the full trace.
+2. **Fix Docker Desktop, then verify Phase 12 live — needs the user, not something to automate.**
+   The daemon is genuinely broken (`Internal Server Error` on every API call, survived a full
+   force-kill + relaunch). Either Docker Desktop → Troubleshoot → "Clean / Purge data" (destructive
+   to all local Docker state) or increasing the VM disk allocation in Settings → Resources →
+   Advanced, then restart. Once healthy: `API_PORT=8180 make demo` (or the default port if nothing
+   else is using 8080 — this session's own tests found an unrelated Docker stack squatting on it);
+   confirm the demo prints working credentials and the app is reachable; `docker stats` to record
+   the actual memory footprint against the 16GB target (Phase 12 AC2); stop/restart a container and
+   confirm no data loss (AC3); confirm `docs/sample-enterprise/` seeded automatically (AC4, `make
+   seed`'s own idempotency check already covers "reproducibly").
+3. **Small Phase 11 loose ends** (optional, low-effort, not blocking): branch protection requiring
+   the pipeline to pass before merge; an actual test that a deliberately-broken commit fails the
+   right job.
 4. Once real-Gemini quota resets, come back to the two deferred Phase 10 items: `make eval
    PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`
    (the representative subset already agreed with the user), then write

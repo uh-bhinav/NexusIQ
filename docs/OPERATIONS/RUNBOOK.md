@@ -122,7 +122,35 @@ extracts it.
 
 `docker stats`. Kafka, Postgres and the AI service (torch + model) are the heavy ones. For a
 lighter loop, run only the infrastructure in Docker and the services on the host
-(`LOCAL_DEV.md` § Development loop). Record the measured footprint in Phase 12.
+(`LOCAL_DEV.md` § Development loop). `docker-compose.prod.yml` (Phase 12) sets a `deploy.resources.
+limits.memory` ceiling per service — `ai-service` is deliberately the most generous (3g) since torch
++ the loaded embedding model are the heaviest single thing in the stack.
+
+### Docker builds fail with "no space left on device" even though `docker system df` looks fine
+
+Confirmed for real during Phase 12 (2026-08-12), not theoretical: `docker system df` can report a
+modest amount of space in use while the *actual* Docker Desktop VM disk file is nearly full — on
+macOS, that file grows from heavy build churn (this session rebuilt the same ~8GB `ai-service` image
+close to a dozen times across Phase 11/12) and does **not** automatically shrink back down, even
+after `docker builder prune -af && docker image prune -af` (those only reclaim space in Docker's own
+accounting, not the VM disk file's on-disk size). Check the actual allocation vs. Docker Desktop's
+own settings: `cat ~/Library/Group\ Containers/group.com.docker/settings-store.json | python3 -c
+"import json,sys; print(json.load(sys.stdin)['DiskSizeMiB'])"`.
+
+If a disk-full error happens *during an active write*, it can leave the daemon in a genuinely broken
+state afterward (not just low on space) — confirmed this session: the daemon started returning
+`Internal Server Error` on every single API call (`docker version`, `docker info`), and a normal
+restart didn't fix it. `osascript -e 'tell application "Docker" to quit'` also did **not** actually
+quit the app — Docker Desktop backgrounds on the dock icon rather than fully exiting by default,
+confirmed by unchanged process start times after "quitting." A full `killall -9 "Docker Desktop"
+com.docker.backend` followed by `open -a Docker` (genuine cold start) got the daemon responding on
+its socket again but still `Internal Server Error`, not actually healthy.
+
+**The real fix needs manual action in Docker Desktop's own UI**, not something to script around:
+either Settings → Resources → Advanced → increase the disk image size, or (if that doesn't help)
+Settings → Troubleshoot → "Clean / Purge data" — the latter is destructive to *all* local Docker
+state (every image, container, and volume, not just one project's), so treat it as a last resort and
+make sure nothing else on the machine depends on what's there first.
 
 ---
 
@@ -132,9 +160,9 @@ lighter loop, run only the infrastructure in Docker and the services on the host
 docker compose restart <svc>          # single service
 make down && make up                  # full restart, data preserved
 make clean && make up && make migrate && make seed   # nuke and rebuild — DESTROYS all local data
+make backup                           # pg_dump the running database to backups/ (Phase 12)
+make restore FILE=backups/nexusiq-....sql.gz   # restore from a backup — asks for confirmation
 ```
-
-Backup/restore of the Postgres volume is a Phase 12 deliverable.
 
 ---
 

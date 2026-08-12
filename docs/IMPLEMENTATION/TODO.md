@@ -31,7 +31,7 @@ Phase 11 progress (2026-08-12):
 - [x] Fixed a real pre-existing gap found while starting this: `frontend/web/package.json` had no
       `test` script at all, despite the Makefile's `test` target calling `npm test` — `make test`
       had silently been unable to run the frontend suite. Added `"test": "vitest run"`.
-      **Not yet committed.**
+      **Committed together with the Phase 12 work below.**
 - [x] `Dockerfile` for all three services (none existed before) — multi-stage, non-root user each.
       `frontend/web/Dockerfile` uses `nginx:alpine` + `nginx.conf.template` (envsubst) for SPA
       routing + `/api/` reverse proxy. `.dockerignore` per service. New `API_PROXY_TARGET` runtime
@@ -40,7 +40,7 @@ Phase 11 progress (2026-08-12):
       `docker history` inspection) but is currently ~8.4GB — see STATUS.md's Phase 11 entry for what
       was tried (a `[tool.uv.sources]` CPU-only torch pin, which didn't work — a real uv 0.8.4
       behavior, not a mistake) and why it's deliberately deferred to Phase 12 ("slim" is Phase 12's
-      own acceptance criterion). **Not yet committed.**
+      own acceptance criterion). **Committed together with the Phase 12 work below.**
 - [x] `.github/workflows/ci.yml` built, committed, pushed with sign-off, and verified fully green
       on real GitHub Actions — run
       [31592814077](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592814077), all 13 job
@@ -58,6 +58,47 @@ Phase 11 progress (2026-08-12):
       are known from a fully green run).
 - [ ] Verify the one remaining acceptance criterion not yet demonstrated: a deliberately-broken
       commit fails the right job.
+
+Phase 12 progress (2026-08-12):
+
+- [x] `HEALTHCHECK` for all three Dockerfiles (spring-api: `wget` vs `/actuator/health`; ai-service:
+      Python stdlib `urllib.request` vs `/ready`, since `python:slim` has neither `curl` nor `wget`
+      by default; frontend: `wget` vs `/`).
+- [x] `docker-compose.prod.yml` — overlay file (always used with `-f docker-compose.yml -f
+      docker-compose.prod.yml`, never standalone): resource limits on every infra service, plus new
+      `spring-api`/`ai-service`/`frontend` services built from their own Dockerfiles, sharing a new
+      `document_storage` volume. `.env.example`'s existing defaults turned out to already be
+      container-network-ready (confirmed by reading the file, not assumed) — only one genuinely new
+      var needed, `FRONTEND_PORT`.
+- [x] `scripts/seed.sh` — idempotent corpus upload via the real spring-api REST API (register-or-
+      login, reuse-workspace-by-name, skip-already-uploaded-documents-by-name). Prints demo login
+      (local-only, not a real secret). `scripts/backup.sh`/`restore.sh` — `pg_dump`/`psql` via
+      `docker compose exec`, `restore.sh` requires typing `yes` first.
+- [x] `Makefile`'s `migrate`/`seed`/`demo`/`backup`/`restore` targets do the real thing now instead
+      of the Phase 0–2 placeholder stubs. `migrate` calls `check-prereqs.sh all` first rather than
+      silently auto-exporting `JAVA_HOME` — this machine's Java-8-default should fail loudly here
+      like everywhere else, not get a quiet one-off workaround.
+- [x] Made one more real, time-boxed attempt at the `ai-service` image-size problem (torch pulling
+      in ~3GB of unused CUDA packages) with a newer `uv` (0.12.3, isolated in `/tmp`, system install
+      untouched) — confirmed via `uv lock -v --refresh` that the pinned CPU-only index is never even
+      queried, reproducibly across two uv versions. A real, well-characterized uv behavior with this
+      exact transitive-dependency scenario, not fixable by a version bump. Reverted cleanly again
+      (confirmed via `git diff` — zero change). Not one of Phase 12's 5 numbered acceptance
+      criteria; left open rather than pursued further.
+- [!] **Live `make demo` verification is blocked on a genuine Docker Desktop daemon failure**, not a
+      code issue: `Internal Server Error` on every API call, survived a full force-kill + relaunch.
+      Root cause diagnosed (VM disk corruption from repeated large builds hitting "no space left on
+      device" mid-write) and documented in `docs/OPERATIONS/RUNBOOK.md`'s new symptom section. The
+      real fix (Clean/Purge data, or increasing the disk allocation) needs the user's direct action
+      in Docker Desktop's own UI — not something to script around. See STATUS.md's Phase 12 entry
+      and "Blocked" section for the full trace.
+- [ ] Once Docker Desktop is healthy again: run `make demo` for real; `docker stats` to record the
+      actual memory footprint against the 16GB target (AC2); stop/restart a container and confirm no
+      data loss (AC3); confirm the corpus seeds automatically (AC4 — `make seed`'s idempotency
+      already covers "reproducibly").
+- [ ] RUNBOOK.md already existed and is substantial (built up across earlier phases) — re-check it
+      still covers "the five most likely failures" (AC5) once live verification is possible; it
+      almost certainly already does, given it currently has 15+ real, specific symptom sections.
 
 ### Backlog (low-priority, not phase-blocking)
 

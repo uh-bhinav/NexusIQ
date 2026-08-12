@@ -18,7 +18,8 @@ D := \033[2m
 N := \033[0m
 
 .PHONY: help setup env check up down restart clean logs ps verify \
-        psql redis-cli topics migrate seed demo test test-unit test-e2e lint eval
+        psql redis-cli topics migrate seed demo test test-unit test-e2e lint eval \
+        _wait _wait_full backup restore
 
 help: ## Show this help
 	@echo ""
@@ -95,16 +96,48 @@ redis-cli: ## Open a redis-cli shell
 topics: ## List Kafka topics
 	@$(COMPOSE) exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
 
+backup: ## Dump the running Postgres database to backups/
+	@./scripts/backup.sh
+
+restore: ## Restore Postgres from a backup — usage: make restore FILE=backups/nexusiq-....sql.gz
+	@./scripts/restore.sh $(FILE)
+
 # ---------------------------------------------------------------- phases
 
-migrate: ## Apply Flyway migrations (Phase 1)
-	@echo -e "$(Y)Not available yet — Flyway migrations arrive in Phase 1.$(N)"
+migrate: ## Apply Flyway migrations against the running Postgres
+	@./scripts/check-prereqs.sh all
+	@test -f $(ENV_FILE) || { echo -e "$(R)No .env — run 'make env' first.$(N)"; exit 1; }
+	@set -a && . ./$(ENV_FILE) && set +a && \
+	cd backend/spring-api && \
+	./mvnw -q flyway:migrate \
+	  -Dflyway.url="jdbc:postgresql://localhost:$${POSTGRES_EXPOSED_PORT:-5434}/$${POSTGRES_DB:-nexusiq}" \
+	  -Dflyway.user="$${POSTGRES_USER:-nexusiq}" \
+	  -Dflyway.password="$${POSTGRES_PASSWORD}"
+	@echo -e "$(G)Migrations applied.$(N)"
 
-seed: ## Load the sample enterprise corpus (Phase 2)
-	@echo -e "$(Y)Not available yet — seeding arrives in Phase 2.$(N)"
+seed: ## Load the sample enterprise corpus into a demo workspace (idempotent)
+	@./scripts/seed.sh
 
-demo: ## One-command demo bootstrap (Phase 12)
-	@echo -e "$(Y)Not available yet — arrives in Phase 12.$(N)"
+demo: ## One-command demo bootstrap: full stack up, migrated, seeded, demo user ready
+	@test -f $(ENV_FILE) || { echo -e "$(R)No .env — run 'make env' first.$(N)"; exit 1; }
+	@echo -e "$(D)Starting the full stack (infrastructure + application services)...$(N)"
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+	@echo ""
+	@echo -e "$(D)Waiting for health checks...$(N)"
+	@$(MAKE) --no-print-directory _wait_full
+	@$(MAKE) --no-print-directory migrate
+	@$(MAKE) --no-print-directory seed
+	@echo ""
+	@echo -e "$(G)Demo ready — see the credentials printed above.$(N)"
+
+_wait_full:
+	@for i in $$(seq 1 90); do \
+	  unhealthy=$$($(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml ps --format json 2>/dev/null \
+	    | grep -c '"Health":"starting"' || true); \
+	  [ "$$unhealthy" = "0" ] && break; \
+	  sleep 2; \
+	done
+	@$(COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
 
 test: ## Run all test suites (Java: *Test via Surefire + *IT via Failsafe, i.e. `mvn verify`)
 	@ran=0; \
