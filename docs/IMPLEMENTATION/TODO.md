@@ -88,11 +88,14 @@ Delete completed items once their phase closes — this is a working list, not a
       correctly could, Decision Detail shows `HUMAN_APPROVED`. Step 7 (data residency `UNKNOWN`)
       remains legitimately Phase 10 work per `docs/sample-enterprise/README.md` — not a Phase 9 gap.
       **All 12 spec §8 steps are now demonstrated end-to-end through the browser, except step 7.**
-- [!] **Large, separate discovery — needs the user's decision, not mine**: `git status` shows the
+- [x] ~~Large, separate discovery — needed the user's decision~~ — done: `git status` had shown the
       entire `ai-service/` and `frontend/web/` directories, plus most of the newer
-      `backend/spring-api` packages, as untracked. Only Phase 0/1 ever got committed. See
-      STATUS.md's Phase 9 entry and the end-of-session message for details — `CLAUDE.md` requires
-      explicit permission before committing, so this is flagged, not acted on.
+      `backend/spring-api` packages, as untracked (only Phase 0/1 had ever been committed). Flagged
+      to the user, who asked for it to be committed now. Landed as 9 commits grouped by phase/
+      service (`6ddb282` through `5f41d5f`), with `.env`/credentials confirmed excluded throughout.
+      See STATUS.md's Phase 9 entry for the exact commit list and the one honest caveat (final
+      `HEAD` state is fully verified; intermediate commits are organizational, not each
+      independently guaranteed to build in isolation).
 - [x] ~~Fix the pagination `sort=` bug~~ — done: `config/SnakeCaseSortPageableResolver`
       (`HandlerMethodArgumentResolver` wrapping Spring Data's default one, converting every
       `Sort.Order` property from snake_case to camelCase before it reaches a repository) +

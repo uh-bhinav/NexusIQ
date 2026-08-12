@@ -1243,15 +1243,27 @@ conflicting/ambiguous corpus doesn't exist yet by design. Phase 9 acceptance cri
 demo performable from the UI alone") is now fully met, modulo that one explicitly-deferred item.
 
 **A separate, much larger discovery made while restoring the fixture — not caused by this session's
-work, but newly surfaced by it**: `git status` shows the *entire* `ai-service/` Python codebase and
-`frontend/web/` directory, plus most of the newer `backend/spring-api` packages
+work, but newly surfaced by it, and now fixed**: `git status` showed the *entire* `ai-service/`
+Python codebase and `frontend/web/` directory, plus most of the newer `backend/spring-api` packages
 (`approval/`, `decision/`, `knowledge/`, `messaging/`, `observability/`, `streaming/`, migrations
-V5–V9), as **untracked** — never committed. Only Phase 0/1's foundational Java work made it into
-git history (`774a14c`, `4a8220c`, `4c41cb0`, `3495982`); everything from roughly Phase 2 onward,
-including this entire multi-round session's work, exists only on disk. This is a real risk (loss on
-disk failure, an accidental `git clean`, etc.), not a code defect — flagged directly to the user
-rather than acted on, since `CLAUDE.md` is explicit that commits happen only when asked. See the
-end-of-session note for the exact ask.
+V5–V9), as **untracked** — never committed. Only Phase 0/1's foundational Java work had made it
+into git history (`774a14c`, `4a8220c`, `4c41cb0`, `3495982`); everything from Phase 2 onward,
+including this entire multi-round session's work, existed only on disk — a real risk (loss on disk
+failure, an accidental `git clean`, etc.). Flagged directly to the user rather than acted on
+unilaterally (`CLAUDE.md` requires explicit permission before committing); the user asked for it to
+be committed now. Landed as 9 commits grouped by phase/service — `6ddb282` (Phase 2-3: documents,
+storage, knowledge search), `1dcdc69` (Phase 5-6: decision lifecycle, Kafka messaging), `054f4c1`
+(Phase 7: approvals), `e32f8dc` (Phase 8: observability), `72db6c2`/`feb9a65` (Phase 9 backend: SSE
+streaming, the pagination sort fix), `632d91d` (Phase 2-6: the entire Python AI service +
+sample corpus), `e206252` (Phase 9: the entire frontend), `5f41d5f` (infra config + docs catch-up).
+Verified `.env` and all credential-shaped files stayed correctly excluded throughout (`git
+check-ignore`, plus a manual scan for secret-looking filenames) before staging anything. One caveat
+worth recording honestly: because this reconstructs history that should have existed incrementally
+across many sessions, intermediate commits are organized by area, not guaranteed independently
+buildable in isolation (e.g. Phase 7's `ApprovalService` references `SseEmitterRegistry`, which
+isn't added until the Phase 9 backend commit two commits later) — only the **final** state at `HEAD`
+is verified, via a full `mvn verify` (63 unit + 34 integration), `pytest` (180), and Vitest/`tsc`/
+`vite build` (40 tests, clean) rerun after every commit landed.
 
 ## Not started
 
