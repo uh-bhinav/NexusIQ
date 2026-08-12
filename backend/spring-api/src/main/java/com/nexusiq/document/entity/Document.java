@@ -12,9 +12,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Phase 1 scope: metadata + workspace-scoped CRUD only. storage_path, checksum and
- * chunk_count stay null/zero until Phase 2 adds real upload, storage and ingestion
- * (ADR-003, ADR-004; docs/IMPLEMENTATION/ROADMAP.md Phase 2).
+ * `storage_path`/`checksum_sha256`/`content_type`/`size_bytes` are set on upload
+ * (Phase 2); `chunk_count` and `status` transitions are driven by the
+ * `document.processed`/`document.failed` Kafka consumers once the AI service
+ * finishes ingestion (ADR-003, ADR-004).
  */
 @Entity
 @Table(name = "documents")
@@ -86,6 +87,39 @@ public class Document {
         this.name = name;
         this.documentType = documentType;
         this.uploadedBy = uploadedBy;
+    }
+
+    /** Records the result of a successful upload+store; status stays/becomes UPLOADED. */
+    public void recordUpload(
+            String originalFilename, String storagePath, String contentType, long sizeBytes, String checksumSha256) {
+        this.originalFilename = originalFilename;
+        this.storagePath = storagePath;
+        this.contentType = contentType;
+        this.sizeBytes = sizeBytes;
+        this.checksumSha256 = checksumSha256;
+        this.status = DocumentStatus.UPLOADED;
+    }
+
+    /** Marks this document as the new current version, superseding {@code previous}. */
+    public void supersede(Document previous) {
+        this.supersedesDocumentId = previous.id;
+        this.version = previous.version + 1;
+        previous.current = false;
+    }
+
+    public void markProcessing() {
+        this.status = DocumentStatus.PROCESSING;
+    }
+
+    public void markReady(int chunkCount) {
+        this.status = DocumentStatus.READY;
+        this.chunkCount = chunkCount;
+        this.failureReason = null;
+    }
+
+    public void markFailed(String reason) {
+        this.status = DocumentStatus.FAILED;
+        this.failureReason = reason;
     }
 
     @PrePersist

@@ -34,6 +34,44 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Phase 8 / ADR-007: OTel tracing via the Micrometer bridge (not the
+		     Java agent — SDK-only, per docs/IMPLEMENTATION/STATUS.md's Phase 8
+		     entry) + Prometheus metrics registry for the already-configured
+		     /actuator/prometheus endpoint. Versions come from
+		     spring-boot-starter-parent's BOM, confirmed present on Maven
+		     Central (io.micrometer:micrometer-tracing-bridge-otel,
+		     io.opentelemetry:opentelemetry-exporter-otlp) rather than pinned
+		     here. spring-boot-micrometer-tracing-opentelemetry is the actual
+		     @AutoConfiguration module that turns the bridge + exporter above
+		     into real OpenTelemetry/Tracer beans (management.tracing.* ->
+		     beans, via its own transitive spring-boot-micrometer-tracing +
+		     spring-boot-opentelemetry) — Boot 4's fine-grained module split
+		     means the bridge jar alone does NOT wire beans. Confirmed missing
+		     empirically first with plain spring-boot-micrometer-tracing alone
+		     (still NoSuchBeanDefinitionException on OpenTelemetry — that
+		     module only consumes an existing io.micrometer.tracing.Tracer,
+		     doesn't create one), fixed by this "-opentelemetry" module
+		     specifically (enumerated via the Maven Central directory listing
+		     since none of the plausible guessed names existed). No
+		     `-starter-` variant of this module exists (unlike webmvc/
+		     restclient above), so the module itself is the correct thing to
+		     depend on. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-otel</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-exporter-otlp</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-micrometer-tracing-opentelemetry</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -54,6 +92,13 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+		<!-- Provides RestClientAutoConfiguration (the RestClient.Builder bean
+		     KnowledgeService uses to call ai-service) — not bundled with
+		     spring-boot-starter-webmvc in Boot 4's split module layout. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-restclient</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>org.flywaydb</groupId>
 			<artifactId>flyway-database-postgresql</artifactId>
@@ -63,6 +108,11 @@
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-kafka</artifactId>
 		</dependency>
 
 		<!-- OpenAPI/Swagger. 3.x is the line compatible with Spring Framework 7 / Boot 4
@@ -125,6 +175,11 @@
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-restclient-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-testcontainers</artifactId>
 			<scope>test</scope>
 		</dependency>
@@ -136,6 +191,35 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-kafka-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-kafka</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.awaitility</groupId>
+			<artifactId>awaitility</artifactId>
+			<version>4.3.0</version>
+			<scope>test</scope>
+		</dependency>
+		<!-- InMemorySpanExporter for deterministic trace-propagation unit tests
+		     (TraceContextPropagationTest) — no live collector needed, mirrors
+		     ai-service's get_in_memory_tracer() test seam. Pinned to the exact
+		     version `mvn dependency:tree` resolved for the other io.opentelemetry
+		     artifacts (transitive via micrometer-tracing-bridge-otel /
+		     opentelemetry-exporter-otlp above) since this module has no BOM of
+		     its own to align it automatically. -->
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-sdk-testing</artifactId>
+			<version>1.62.0</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
