@@ -7,112 +7,27 @@ Delete completed items once their phase closes — this is a working list, not a
 
 ---
 
-## Now — continue Phase 9
+## Now — start Phase 10 (Testing & evaluation)
 
-- [x] ~~Build the SSE endpoint~~ — done: `streaming` package (`SseEmitterRegistry`,
-      `DecisionStreamController`/`Service`), a scoped `JwtService` stream token (EventSource can't
-      set headers), wired into all 4 places a decision's status changes. Live-verified with a real
-      `curl -N` SSE session against real spring-api. See STATUS.md's Phase 9 entry.
-- [x] ~~Add the chunk-fetch endpoint~~ — done: Python `GET /internal/documents/{documentId}/chunks`
-      (workspace-scoped, paginated, 5 new tests) + Java `DocumentChunkService`/`DocumentController`
-      proxy (`GET /workspaces/{id}/documents/{documentId}/chunks`), mirroring the existing
-      `KnowledgeService`→`/internal/search` pattern rather than giving Java direct
-      `document_chunks` access. No `EvidenceResponse` changes needed — it already carried
-      `document_id`/`chunk_id`. AC3 met. Live-verified end-to-end against real spring-api +
-      ai-service (register → workspace → upload → async-ingest to `READY` → fetch chunks), which
-      caught a real bug: `schemas.ts` used `.nullable()` but the backend's `ALL_NON_NULL` Jackson
-      config omits null fields entirely rather than sending `null`, so a chunk with no
-      `section`/`subsection`/`page_number` failed Zod parsing. Fixed project-wide
-      (`.nullable()` → `.nullish()` across `schemas.ts`, plus 6 call sites that did unsafe
-      `!== null` checks that would've let `undefined` through to a crash). See STATUS.md's Phase 9
-      entry for the full writeup — this was a systemic, previously-undetected defect across nearly
-      every page, not something scoped to just the chunk endpoint.
-- [x] ~~Build the last remaining Phase 9 page: Document detail~~ — done:
-      `DocumentDetailPage.tsx` (metadata + paginated chunk list + `?chunk=` scroll-to-highlight),
-      3 tests. Evidence citations on `DecisionDetailPage` are now real links to
-      `/w/{workspaceId}/documents/{documentId}?chunk={chunkId}`. All 9 required pages now exist.
-- [x] ~~Apply `RequireRole` to the approvals/metrics routes~~ — turned out to be the wrong fix:
-      `GET /approvals` and `GET .../metrics/summary` are both member-visible with no server-side
-      role restriction (confirmed by reading `ApprovalController`/`MetricsController` — neither has
-      `@PreAuthorize`, only membership via `WorkspaceAccessService`); only the approve/reject
-      *actions* are role-gated. `ApprovalQueuePage` already hides the buttons (not the page) for a
-      non-APPROVER/ADMIN, matching the real API and satisfying AC4 as written — a route-level guard
-      would have been a regression, blocking VIEWERs from a page they're allowed to see.
-- [x] ~~Chrome extension browser click-through~~ — done: walked login → Dashboard → Knowledge Base
-      search → submit Decision Request → live SSE agent timeline → outcome with real citation →
-      citation click-through to exact chunk → Approval Queue → System Metrics → Audit Log, zero
-      console errors. Caught and fixed a real bug: `DecisionService.create()` never wrote an audit
-      event (`ApprovalService` did this correctly for approve/reject, creation was missing it) —
-      fixed with `AuditService.record(...)` + `DecisionServiceTest` case.
-- [x] ~~Build the missing Document Upload UI~~ — done: added to `KnowledgeBasePage.tsx` (upload
-      form + document list, 4s poll for async ingestion status). Live-verified uploading the real
-      sample corpus's injection file through the UI — the heuristic scanner correctly flagged it
-      (spec §8 step 11 confirmed end-to-end).
-- [x] ~~Build minimal workspace member management~~ — done: `MembersSection.tsx` on
-      `DashboardPage.tsx`, gated on workspace-level `role === 'ADMIN'` (matches
-      `WorkspaceService.addMember`'s server-side check exactly). Live-verified adding a real second
-      user as a member through the UI. `.claude/rules/frontend.md`'s required-pages list doesn't
-      mention a members page — flagged as a doc inconsistency against spec §8, not silently
-      resolved.
-- [x] ~~Demonstrate `INSUFFICIENT_INFORMATION` (spec §8 step 12) live~~ — done, with explicit user
-      approval to spend real Gemini API calls (mock provider returns one fixed canned response
-      regardless of input, so it can't demonstrate this). Submitted a genuinely out-of-scope
-      question; real `intent` agent classified it correctly and short-circuited to
-      `INSUFFICIENT_INFORMATION` with `evidence: []`. **This is what surfaced a second real crash
-      bug**: `DecisionOutcome.evidence_coverage` was a required Zod field but the Java `BigDecimal`
-      backing it is genuinely null on this fast path (`ALL_NON_NULL` omits it) — Decision Detail
-      rendered completely blank, no error shown anywhere. Fixed, then swept every other
-      `BigDecimal`-backed decision DTO field for the same risk and fixed 5 more
-      (`DecisionRun`/`AgentExecution.estimated_cost_usd`, `Evidence.relevance_score`,
-      `Finding`/`DecisionOutcome.confidence`) plus render-side `!= null` guards. See STATUS.md's
-      Phase 9 entry for the full trace.
-- [x] ~~Exercise a real LLM failure path~~ — unplanned, but happened: a follow-up real-Gemini call
-      hit the actual free-tier quota (`429 RESOURCE_EXHAUSTED`) mid-workflow. Run terminated cleanly
-      to `FAILED` with a human-readable `failure_reason`, exactly per
-      `.claude/rules/architecture.md`'s degradation table. Confirms that requirement against a real
-      failure, not a simulated one. Quota now exhausted — stopped spending further real API calls,
-      `ai-service` switched back to `LLM_PROVIDER=mock`.
-- [x] ~~Escalation-to-human-approval and an actual APPROVER clicking Approve (spec §8 steps 8–9)~~
-      — done, without spending further Gemini quota: `approval_router_node`'s six triggers are a
-      deterministic gate over LLM node output, so temporarily lowering the mock
-      `tests/fixtures/llm/Recommendation.json` fixture's `confidence` below
-      `HITL_MIN_CONFIDENCE=0.75` reproduces a genuine escalation under `LLM_PROVIDER=mock` (the
-      mock provider re-reads fixtures from disk on every call, no restart needed). Confirmed safe
-      first (only one inclusive-membership pytest assertion references this fixture), restored it
-      immediately after and reran the affected suites (50/50 passed). Caught a 4th real bug in the
-      process: `ApprovalQueuePage.tsx` gated the Approve/Reject buttons on the *global* role, but
-      `ApprovalService` authorizes on the *workspace-level* one — every existing test passed
-      because its fixtures always set both identically. Fixed to match `MembersSection.tsx`'s
-      correct pattern, added 2 regression tests. Live-verified the full loop: requester correctly
-      blocked from approving their own request (separation of duties), a second APPROVER user
-      correctly could, Decision Detail shows `HUMAN_APPROVED`. Step 7 (data residency `UNKNOWN`)
-      remains legitimately Phase 10 work per `docs/sample-enterprise/README.md` — not a Phase 9 gap.
-      **All 12 spec §8 steps are now demonstrated end-to-end through the browser, except step 7.**
-- [x] ~~Large, separate discovery — needed the user's decision~~ — done: `git status` had shown the
-      entire `ai-service/` and `frontend/web/` directories, plus most of the newer
-      `backend/spring-api` packages, as untracked (only Phase 0/1 had ever been committed). Flagged
-      to the user, who asked for it to be committed now. Landed as 9 commits grouped by phase/
-      service (`6ddb282` through `5f41d5f`), with `.env`/credentials confirmed excluded throughout.
-      See STATUS.md's Phase 9 entry for the exact commit list and the one honest caveat (final
-      `HEAD` state is fully verified; intermediate commits are organizational, not each
-      independently guaranteed to build in isolation).
-- [x] ~~Fix the pagination `sort=` bug~~ — done: `config/SnakeCaseSortPageableResolver`
-      (`HandlerMethodArgumentResolver` wrapping Spring Data's default one, converting every
-      `Sort.Order` property from snake_case to camelCase before it reaches a repository) +
-      `config/WebConfig` (`WebMvcConfigurer.addArgumentResolvers`, registers it ahead of the
-      built-in resolver). 4 new unit tests on the conversion logic
-      (`SnakeCaseSortPageableResolverTest`) + 1 new integration test
-      (`WorkspaceFlowIT.listDocuments_withSnakeCaseSortParam_matchesTheDocumentedApiConvention`,
-      proving `?sort=created_at,desc` returns correctly-ordered documents against a real Postgres
-      instead of 500ing). Live-reverified against the running API across three different endpoints/
-      entities (`decisions?sort=created_at,desc`, `documents?sort=created_at,asc`,
-      `audit?sort=occurred_at,desc`) — all correctly ordered, no errors. `./mvnw verify`: 63 unit +
-      34 integration, 0 failures.
-- [x] ~~Phase 8 live-verification gap~~ — done: full live run performed, all 6 acceptance criteria
-      met with real evidence, 4 real bugs found and fixed along the way. See STATUS.md's Phase 8
-      entry.
-- [x] ~~Confirm exact Prometheus metric names~~ — done, confirmed live; dashboard queries tightened
-      to exact names.
+Phase 9 is closed — see `## Phase 9 — Frontend ✅ COMPLETE` below and STATUS.md's Phase 9 entry for
+the full history (kept there per this file's own "delete completed items" convention).
+
+- [ ] Orient: read `ROADMAP.md`'s Phase 10 section in full, plus `.claude/rules/testing.md` and
+      `docs/TESTING/STRATEGY.md`, before writing anything.
+- [ ] Close coverage gaps in all three services (Java/Python/frontend) — identify what's
+      genuinely untested first, don't pad numbers.
+- [ ] All 14 named failure-scenario tests from `.claude/rules/testing.md` §"Failure scenarios that
+      must have tests", each a real named test, not a hope.
+- [ ] E2E test: upload → ingest → decide → validate → escalate → approve → audit.
+- [ ] Evaluation harness + ≥30 labelled cases in `ai-service/evaluation/datasets/` (clean approval,
+      conditional approval, rejection, unknown, conflicting versions, no evidence, injection,
+      out-of-scope) — this is also where spec §8 step 7 (data residency `UNKNOWN`) finally gets a
+      corpus that can produce it, per `docs/sample-enterprise/README.md`.
+- [ ] Baseline report → `docs/AI/EVALUATION_BASELINE.md`.
+- [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded.
+
+### Backlog (low-priority, not phase-blocking)
+
 - [ ] Optionally add `export JAVA_HOME=$(/usr/libexec/java_home -v 21)` to `~/.zshrc` so it's
       not needed per-command (Java 21 + Maven are installed; only the shell default is stale).
 - [ ] `GlobalExceptionHandler` returns `500` instead of `405` for a wrong HTTP verb on a real
@@ -123,12 +38,11 @@ Delete completed items once their phase closes — this is a working list, not a
 - [ ] Local dev Kafka broker has accumulated harmless DLQ noise from live-verification + Python
       test runs against the shared local broker (see STATUS.md known bugs) — no action needed,
       clears on `docker compose down -v`.
-- [ ] Re-verify Phase 7's live paths against real Gemini once the `gemini-2.5-flash` daily free-tier
-      quota resets — this session's live verification used the mock provider (quota was already
-      exhausted from Phase 5/6 testing); the pipeline mechanics are proven, a real-model run would
-      additionally reconfirm genuine model-driven low-confidence escalation.
 - [ ] `handle_approval_message`'s resume-failure path (ai-service) has no automatic retry — see
       STATUS.md technical debt; no action needed unless observed for real.
+- [ ] `git log` now has organizational-not-strictly-bisectable intermediate commits from the
+      Phase 2-9 git catch-up (see STATUS.md's Phase 9 entry) — not worth rewriting history to fix;
+      noted so a future `git bisect` session isn't surprised if an intermediate commit doesn't build.
 
 ## Phase 0 — Repository & environment ✅ COMPLETE (2026-08-09)
 
@@ -240,31 +154,31 @@ Delete completed items once their phase closes — this is a working list, not a
       by unit tests but not yet observed against a real live decision run (blocked on `.env`
       access this session)
 
-## Phase 9 — Frontend (started 2026-08-11, in progress)
+## Phase 9 — Frontend ✅ COMPLETE (2026-08-11 to 2026-08-12)
 
 - [x] Vite + TS + Tailwind/shadcn + TanStack Query; typed client with Zod
 - [x] 9 pages — all done (Login, Dashboard, Knowledge Base, Decision Requests, Decision Detail,
       Approval Queue, Audit Log, System Metrics, Document Detail)
 - [x] SSE client with reconnect / cleanup / poll fallback — done, live-verified against real
-      spring-api (`src/lib/sse-client.ts`, `use-decision-stream.ts`)
-- [x] Decision detail with resolvable citations + agent timeline — page built, agent timeline done;
-      citations are real links to `/w/{workspaceId}/documents/{documentId}?chunk={chunkId}`,
-      resolving to the exact chunk via the new chunk-fetch endpoint. Known, documented limitation:
-      no auto-pagination-to-find if the cited chunk isn't on the first page of results.
+      spring-api, and the reconnect/backoff/terminal-close/cleanup logic itself directly unit-tested
+      with a controllable `EventSource` (`src/lib/sse-client.ts` + `sse-client.test.ts`)
+- [x] Decision detail with resolvable citations + agent timeline — citations are real links to
+      `/w/{workspaceId}/documents/{documentId}?chunk={chunkId}`, resolving to the exact chunk.
+      Unresolvable citations (e.g. a since-deleted document) surface an explicit AsyncState error on
+      Document Detail, never a silent failure. Known, documented limitation: no
+      auto-pagination-to-find if the cited chunk isn't on the first page of results.
 - [x] Loading / empty / error states everywhere — done for all 9 pages (`AsyncState` component)
-- [x] Role guards — `RequireAuth` applied to every authenticated route; `RequireRole` built but
-      deliberately *not* applied to approvals/metrics routes — neither is actually role-restricted
-      server-side (only the approve/reject actions are), so a route guard there would be a
-      regression, not a fix. `ApprovalQueuePage` hides the action buttons per-role instead, which is
-      what AC4 actually asks for.
-- [~] Verify all 7 acceptance criteria — AC2 (SSE live updates), AC3 (citations resolve to exact
-      chunk), AC4 (VIEWER sees no approve buttons, server 403 already proven by Phase 7), AC6
-      (build/tsc clean), AC7 (no mock data) all live-verified through the actual browser against the
-      real stack. AC1 (entire demo performable from UI alone) is met for spec §8 steps 1–6, 10–12;
-      steps 8–9 (escalation + human approve) are mechanism-verified via direct API calls but not
-      re-walked through the browser with a genuinely escalating real-LLM decision — blocked on
-      Gemini free-tier quota exhaustion this session, not missing functionality. AC5 (RTL/MSW
-      populated/empty/error/primary-action per page) met — 38/38 passing.
+- [x] Role guards — `RequireAuth` on every authenticated route. Button-level visibility
+      (Approval Queue, member management) follows the actual server-side authorization boundary,
+      which is the *workspace-level* role, not the global one — a real bug (`ApprovalQueuePage`
+      originally checked the global role) was found and fixed via live verification.
+- [x] Verify all 7 acceptance criteria — **all met**, all with real-browser evidence against the
+      live stack, not just RTL/MSW: AC1 (spec §8 steps 1-6 and 8-12 performable from the UI alone;
+      step 7 is legitimately Phase 10 work), AC2 (SSE live updates + a directly-tested reconnect
+      path), AC3 (citations resolve to the exact chunk, unresolvable ones warn explicitly), AC4
+      (VIEWER sees no approve buttons, server 403 proven by Phase 7), AC5 (44/44 Vitest passing,
+      every page's four states), AC6 (`tsc -b`/`vite build` clean, zero `any`), AC7 (no mock data
+      anywhere — confirmed by grep, not just claimed).
 
 ## Phase 10 — Testing & evaluation
 

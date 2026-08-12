@@ -5,24 +5,29 @@ every session.** If this file and the repository disagree, the repository is rig
 
 ---
 
-**Last updated:** 2026-08-11
-**Last verified:** 2026-08-11 — **Phase 8 fully live-verified** (all 6 acceptance criteria, 4 real
-bugs found and fixed — see that phase's entry). **Phase 9: 8 of 9 pages built** (only Document
-detail remains), SSE backend live-verified with a real `curl -N` session (real
-`decision.status`/`approval.required`/`agent.completed`/`heartbeat`/terminal `decision.completed`
-events from a real decision run and a real approval), and every new endpoint this session touched
-(REST API, SSE stream, approvals, audit, metrics) checked directly against the real backend through
-the Vite proxy. `./mvnw verify` → 58 unit + 33 integration passed. `tsc -b`/`vite build`/`oxlint`/
-Vitest all clean (28/28 frontend tests). Real browser click-through still not done (Chrome
-extension not connected this session).
+**Last updated:** 2026-08-12
+**Last verified:** 2026-08-12 — **Phase 9 complete and fully live-verified.** All 9 pages built, all
+7 acceptance criteria met with real-browser evidence against the live stack (not just RTL/MSW):
+the full spec §8 12-step demo is performable from the UI alone except step 7 (deferred to Phase 10
+by design — the fuller conflicting-evidence corpus doesn't exist yet), SSE live updates plus a
+directly-tested reconnect/backoff/terminal-close path, citations resolving to the exact chunk,
+role-appropriate visibility enforced both client- and server-side, and zero mock data anywhere.
+Four real bugs were found and fixed via live verification alone — none of them would have been
+caught by the mocked test suite: a missing decision-request audit event, a systemic
+`.nullable()`/`ALL_NON_NULL` Jackson schema mismatch that silently crashed pages on any
+real-world null, a `DecisionService` role-check that read the wrong (global, not workspace-level)
+role, and a documented pagination convention that 500'd on every endpoint. `./mvnw verify` → 63
+unit + 34 integration passed. `tsc -b`/`vite build`/`oxlint`/Vitest all clean (44/44 frontend
+tests). The entire project (previously mostly uncommitted from Phase 2 onward) is now committed to
+git in 9 phase-grouped commits. Starting Phase 10 (Testing & evaluation) next.
 
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 9 — Frontend (**in progress** — scaffold + auth + 3/9 pages, see entry below) |
-| **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ (code + tests + infra complete; one live-run caveat, see below) |
-| **Next milestone** | Remaining Phase 9 pages (Document detail, Decision Detail + SSE, Approval Queue, Audit Log, System Metrics) — see "In progress" below for the concrete next steps and the two backend gaps discovered along the way |
+| **Current phase** | Phase 10 — Testing & evaluation (**starting**) |
+| **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
+| **Next milestone** | Phase 10: close the 14 named failure-scenario tests, an E2E test, the evaluation harness + ≥30 labelled cases, a baseline report, and an A/B model comparison |
 
 ## Completed
 
@@ -837,7 +842,7 @@ from `__name__` regex tolerance to these exact names.
 
 ## In progress
 
-**Phase 9 — Frontend (started 2026-08-11, not complete).**
+**Phase 9 — Frontend (2026-08-11 to 2026-08-12, COMPLETE).**
 
 Scaffold (`frontend/web`): Vite + React 19 + TypeScript strict + Tailwind v4 (`@tailwindcss/vite`,
 CSS-first config, no `tailwind.config.js`) + shadcn-style primitives (`Button`, `Input`, `Label`,
