@@ -131,6 +131,30 @@ standard `VALIDATION_ERROR` 400 envelope. `./mvnw verify` → 72 unit + 37 integ
 (unaffected by the `audit.ts` signature change — the added query param doesn't break the existing
 MSW path-matched mock).
 
+Continued down the same audit's ranked list, both genuine, previously-zero-coverage gaps:
+
+- **`LocalDocumentStorage`** had no test file at all — its path-traversal guard
+  (`resolveWithinBase`'s `normalize()`/`startsWith` check) and checksum computation were completely
+  unexercised. New `LocalDocumentStorageTest.java` (8 tests, plain JUnit `@TempDir`, no Docker
+  needed — the class has no Spring context dependency beyond a plain record): store/retrieve/delete
+  round-trip, checksum correctness against an independently-computed SHA-256, idempotent delete on a
+  missing file, and — the actual security-relevant cases — `../../../../etc/passwd` and an absolute
+  `/etc/passwd` path both rejected with `IllegalArgumentException`, proven for `retrieve` and
+  `delete` separately rather than assuming one internal call site covers all three public methods.
+- **The frontend's mandated 401→refresh→retry-once→logout interceptor** (`.claude/rules/
+  frontend.md`) had never been exercised past its 401-detection branch — `LoginPage`'s own 401 test
+  never reaches the refresh/retry code at all. New `src/api/client.test.ts` (5 tests): a 401 refreshes
+  once and retries the original request with the new token; two concurrent 401s trigger exactly one
+  refresh call (proving the `refreshPromise` de-dup guard); a failed refresh clears tokens and
+  redirects to `/login` rather than looping; a request that gets a *second* 401 after already being
+  retried does not retry again (`original._retried`'s bound, proven directly rather than assumed);
+  and a non-401 error is wrapped into the typed `HttpError`, not swallowed. `window.location.assign`
+  isn't directly spy-able in jsdom (non-configurable property) — worked around by replacing
+  `window.location` wholesale for each test via `Object.defineProperty`, restored in `afterEach`.
+
+`./mvnw verify` → 80 unit (+8 `LocalDocumentStorageTest`) + 37 integration passed, 0 failures.
+`tsc --noEmit`/`oxlint` clean, Vitest 49/49 (+5 `client.test.ts`).
+
 ## Current position
 
 | | |
@@ -1570,11 +1594,11 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Suite | State |
 |---|---|
 | Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
-| Java unit (`*Test`, Surefire) | ✅ 72/72 (+9 `ApprovalGateTest`, new this phase — all 7 `ApprovalGate` triggers plus a clean-payload and an `INSUFFICIENT_INFORMATION` negative case) |
+| Java unit (`*Test`, Surefire) | ✅ 80/80 (+9 `ApprovalGateTest`, +8 `LocalDocumentStorageTest`, new this phase) |
 | Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 37/37 (+3 `AuditFlowIT`, new this phase — the cross-tenant fix for `GET /audit/resource/...`) |
 | Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 208/208 (+9 failure-scenario gaps, +19 `tests/evaluation/test_metrics.py`) |
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
-| Frontend (`vitest`, RTL + MSW) | ✅ 44/44 |
+| Frontend (`vitest`, RTL + MSW) | ✅ 49/49 (+5 `client.test.ts`, new this phase — the 401 interceptor's refresh/retry/logout paths) |
 | Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
 | E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
 | Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
@@ -1619,20 +1643,16 @@ Continue Phase 10. Concretely, in roughly this order:
    (e.g. cheap-everywhere vs the heavier model on synthesis/validation) across accuracy, latency, and
    cost, using the harness's `--provider`/settings overrides already built. Same quota consideration
    as above — this roughly doubles the real-LLM-call cost of step 2.
-4. **Commit the `AuditController` cross-tenant fix** (currently implemented and verified, but
-   uncommitted — see the Phase 10 entry above): `AuditController.java`, `AuditEventRepository.java`,
-   `GlobalExceptionHandler.java`'s two new handlers, `AuditFlowIT.java`, and the frontend
-   `audit.ts`/`DecisionDetailPage.tsx` signature change.
-5. **Continue closing the remaining genuine coverage gaps** this session's audit surfaced (not yet
-   acted on): `LocalDocumentStorage` has zero test file (path-traversal guard, checksum logic
-   unexercised); the frontend's mandated 401→refresh→retry-once→logout interceptor
-   (`src/api/client.ts`) has no dedicated test for the refresh path itself; `ai-service/app/prompts/
-   compose.py` (splices the injection-defense fragment into every agent's system prompt) has no
-   `tests/prompts/` at all; `decision/DecisionController.java`, `document/DocumentController.java`,
-   `knowledge/KnowledgeController.java` lack a `*FlowIT.java` with an explicit cross-tenant `404`
-   check the way Auth/Workspace/Approval/Audit now all have. Prioritize in that order — the first
-   three are security/integrity-relevant, the fourth is a consistency gap against an established
-   pattern that's already caught one real bug (this session's `AuditController` fix).
+4. ~~Commit the `AuditController` cross-tenant fix~~ — done (`cb8c058`).
+5. ~~`LocalDocumentStorageTest.java` + `client.test.ts`~~ — implemented and verified (80 unit + 37
+   integration Java, 49/49 frontend), **not yet committed** — commit next.
+6. **Continue closing the remaining genuine coverage gaps** this session's audit surfaced (not yet
+   acted on): `ai-service/app/prompts/compose.py` (splices the injection-defense fragment into every
+   agent's system prompt) has no `tests/prompts/` at all; `decision/DecisionController.java`,
+   `document/DocumentController.java`, `knowledge/KnowledgeController.java` lack a `*FlowIT.java`
+   with an explicit cross-tenant `404`
+   check the way Auth/Workspace/Approval/Audit now all have — a consistency gap against an
+   established pattern that's already caught one real bug this session (the `AuditController` fix).
 
 Phase 8 itself is fully done, including live verification — nothing further needed there except the
 confidence-calibration technical debt from Phase 4/7 (unrelated, low priority, Phase 10 territory).
