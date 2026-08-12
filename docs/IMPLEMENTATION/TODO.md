@@ -7,61 +7,13 @@ Delete completed items once their phase closes — this is a working list, not a
 
 ---
 
-## Now — start Phase 10 (Testing & evaluation)
+## Now — start Phase 11 (CI/CD)
 
-Phase 9 is closed — see `## Phase 9 — Frontend ✅ COMPLETE` below and STATUS.md's Phase 9 entry for
-the full history (kept there per this file's own "delete completed items" convention).
+Phase 10 is substantially complete — see `## Phase 10 — Testing & evaluation ✅` below and STATUS.md
+for the full history. Two items remain, explicitly deferred (blocked on real Gemini quota, user
+instruction 2026-08-12 to proceed to Phase 11/12 rather than wait):
 
-- [x] Orient: read `ROADMAP.md`'s Phase 10 section in full, plus `.claude/rules/testing.md` and
-      `docs/TESTING/STRATEGY.md`, before writing anything.
-- [x] All 14 named failure-scenario tests from `.claude/rules/testing.md` §"Failure scenarios that
-      must have tests" — audited (9 already covered), closed the 5 gaps (#2 contradictory
-      documents, #3 two policy versions, #6 LLM timeout retry, #9 Kafka consumer failure×3→DLQ,
-      #14 Redis unavailable). #2 surfaced and fixed a genuine full-stack bug: `CONFLICTING_EVIDENCE`
-      was missing from the `recommendation` enum in Python/Java/DB/frontend. See STATUS.md's
-      Phase 10 entry for the full detail. **Committed as `a90b626`.**
-- [x] Rebuilt `docs/sample-enterprise/` to the full 10-document, 7-subdirectory corpus per
-      `docs/PROJECT_SPEC.md` §9 — unblocks the evaluation dataset below and spec §8 step 7's
-      `UNKNOWN` case. **Committed as `a90b626`.**
-- [x] `ApprovalGateTest.java` — this deterministic gate had zero direct unit tests; now has 9,
-      covering all 7 triggers. **Committed as `a90b626`.**
-- [x] E2E test: upload → ingest → decide → validate → escalate → approve → audit.
-      `tests/e2e/test_full_spine.py`, driven against real spring-api + ai-service processes (not
-      Testcontainers — see its module docstring). Required a small `MOCK_FIXTURES_DIR` setting +
-      a dedicated `llm_e2e_escalate` fixture set so the escalate/approve branch is reachable
-      deterministically (the default mock fixtures always cleanly auto-approve). `make test-e2e`
-      added. See STATUS.md's Phase 10 entry for the full detail. **Committed as `487ebff`.**
-- [x] Evaluation harness + 30 labelled cases. `ai-service/app/evaluation/` (`models.py`,
-      `metrics.py`, `corpus.py`, `harness.py`) + `app/evaluation/datasets/cases.json`, hitting every
-      category minimum from `docs/AI/EVALUATION.md` exactly. `make eval` added. 19 dedicated unit
-      tests for the metrics functions (`tests/evaluation/test_metrics.py`). Ran once against the
-      mock provider: 30/30 cases, 0 errors — confirms the harness is correct, but this is a **smoke
-      test only, not a quality baseline** (mock's fixtures are fixed regardless of the question
-      asked — verified empirically, not assumed). See STATUS.md's Phase 10 entry for the full
-      detail. **Committed as `2623d52`.**
-- [x] Audited genuine coverage gaps across all three services (Explore-agent survey, ranked by
-      risk). Fixed the top one: `GET /audit/resource/{resourceType}/{resourceId}` had **zero
-      workspace-membership check** — a real, previously-shipped cross-tenant leak (any authenticated
-      user could read another workspace's document/decision/approval audit history by guessing a
-      resource type + UUID). Fixed: endpoint now requires `workspaceId` + membership check, repo
-      query filters on `workspace_id` in SQL, frontend threads the param through. New
-      `AuditFlowIT.java` (3 tests — this controller had none before) also surfaced a second bug: a
-      missing required query param 500'd instead of 400'ing (no `GlobalExceptionHandler` case for
-      `MissingServletRequestParameterException`) — added that plus the analogous
-      `MethodArgumentTypeMismatchException` handler. `./mvnw verify` → 72 unit + 37 integration (+3),
-      0 failures. See STATUS.md's Phase 10 entry for the full detail. **Committed as `cb8c058`.**
-- [x] `LocalDocumentStorageTest.java` (8 tests — path-traversal guard, checksum computation,
-      store/retrieve/delete round-trip; plain JUnit `@TempDir`, no Docker needed) and
-      `src/api/client.test.ts` (5 tests — the 401→refresh→retry-once→logout interceptor's
-      refresh-dedup, bounded-retry, and failed-refresh-redirect paths, none of which any prior test
-      reached). `./mvnw verify` → 80 unit + 37 integration, 0 failures. Vitest 49/49. See STATUS.md's
-      Phase 10 entry for the full detail. **Not yet committed.**
-- [ ] Remaining coverage gaps from the same audit, not yet acted on: `ai-service/app/prompts/
-      compose.py` (splices the injection-defense fragment into every agent prompt) has no tests at
-      all; `decision/DecisionController.java`, `document/DocumentController.java`,
-      `knowledge/KnowledgeController.java` lack a `*FlowIT.java` with an explicit cross-tenant `404`
-      check the way Auth/Workspace/Approval/Audit now all have.
-- [ ] **Retry the real-Gemini baseline once the free-tier daily quota resets.** Already asked the
+- [!] **Retry the real-Gemini baseline once the free-tier daily quota resets.** Already asked the
       user and got sign-off for a small representative subset (one case per category, 8/9
       categories) rather than the full 30. Attempted it — all 8 cases hit `429 RESOURCE_EXHAUSTED`
       immediately, quota already exhausted from this session's earlier live-verification calls.
@@ -70,8 +22,27 @@ the full history (kept there per this file's own "delete completed items" conven
       CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`. Then write
       `docs/AI/EVALUATION_BASELINE.md` (scoped honestly as 8/30 categories unless the full 30 are
       run later).
-- [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded (same
+- [!] A/B comparison of at least two model configurations with accuracy/latency/cost recorded (same
       quota consideration as above — roughly doubles the real-LLM-call cost).
+
+Phase 11 orientation: read `ROADMAP.md`'s Phase 11 section (already done this session) — GitHub
+Actions pipeline (lint → unit → integration → build → Docker build → eval(mock) → security scan),
+path-filtered jobs, dependency caching, branch protection. `.github/workflows/` currently doesn't
+exist at all — from-scratch build, not a refinement.
+
+- [ ] `.github/workflows/ci.yml` (or split per-service workflows): lint job (ruff+mypy, oxlint+tsc,
+      — Java has no separate lint step configured, confirm), unit test job (Surefire, `uv run
+      pytest -m "not integration"` if such a marker exists or the fast subset, Vitest), integration
+      test job (Failsafe + Testcontainers — needs Docker-in-Docker/services in the runner), build
+      job, Docker build job (needs Phase 12's Dockerfiles — may need to sequence after or build a
+      minimal Dockerfile now and harden in Phase 12), evaluation job (mock provider only, free/
+      deterministic), security scan job (`pip-audit`, `npm audit`, OWASP dependency-check for Maven,
+      Trivy for images).
+- [ ] Branch protection requiring the pipeline to pass before merge.
+- [ ] Verify acceptance criteria: green on a clean push; a deliberately broken commit fails the
+      right job (test this for real, don't assume); Docker images build for all three services;
+      total runtime < 15 min; secret scanning enabled; no secret ever printed in a log (check
+      workflow logs directly, don't just assume `env:` handling is safe).
 
 ### Backlog (low-priority, not phase-blocking)
 
@@ -227,17 +198,19 @@ the full history (kept there per this file's own "delete completed items" conven
       every page's four states), AC6 (`tsc -b`/`vite build` clean, zero `any`), AC7 (no mock data
       anywhere — confirmed by grep, not just claimed).
 
-## Phase 10 — Testing & evaluation
+## Phase 10 — Testing & evaluation ✅ SUBSTANTIALLY COMPLETE (2026-08-12)
 
-- [ ] Close coverage gaps in all three services
-- [ ] All 14 named failure-scenario tests
-- [ ] E2E test
-- [ ] Evaluation harness + ≥30 labelled cases
-- [ ] Baseline report → `docs/AI/EVALUATION_BASELINE.md`
-- [ ] Model A/B with quantified trade-off
-- [ ] Verify all 5 acceptance criteria
+- [x] Closed coverage gaps in all three services (audited, not assumed — see STATUS.md's Phase 10
+      entry for the full ranked list and what was fixed vs. deliberately left)
+- [x] All 14 named failure-scenario tests
+- [x] E2E test (`tests/e2e/test_full_spine.py`)
+- [x] Evaluation harness + 30 labelled cases
+- [!] Baseline report → `docs/AI/EVALUATION_BASELINE.md` — **blocked on Gemini quota**, see "Now"
+- [!] Model A/B with quantified trade-off — **blocked on Gemini quota**, see "Now"
+- [~] Verify all 5 acceptance criteria — 3/5 fully met; the 2 requiring real-provider numbers are
+      the two blocked items above
 
-## Phase 11 — CI/CD
+## Phase 11 — CI/CD (starting now — see "Now" above for the live task list)
 
 - [ ] Workflow: lint → test → integration → build → docker → eval → security scan
 - [ ] Caching, path filters, branch protection
@@ -251,11 +224,11 @@ the full history (kept there per this file's own "delete completed items" conven
 - [ ] RUNBOOK + demo script + volume backup/restore
 - [ ] Verify all 5 acceptance criteria
 
-## Phase 13 — Kubernetes (optional)
+## Phase 13 — Kubernetes — OUT OF SCOPE, do not start (user instruction, 2026-08-12)
 
-- [ ] Manifests / Helm chart
-- [ ] kind bootstrap script; E2E against kind
-- [ ] Verify acceptance criteria
+The roadmap itself flags this as optional and only worth doing "if 0–12 are genuinely done." The
+user has explicitly said Phase 12 is where this project wraps. Left here unstarted, not deleted, so
+a future session doesn't wonder whether it was forgotten rather than declined.
 
 ---
 
@@ -263,11 +236,12 @@ the full history (kept there per this file's own "delete completed items" conven
 
 - [x] `docs/sample-enterprise/` Phase 2 starter set — 4 documents (PDF/DOCX/TXT/MD), one per
       format, the MD containing a real injection attempt (2026-08-10)
-- [ ] Grow to the full ≥10-document set with deliberate conflicts, an unresolvable `UNKNOWN`, and
-      a superseded version pair (needed by Phase 5 for conflict/version resolution, Phase 10 for
-      the evaluation dataset)
-- [ ] Write the ≥30-case evaluation dataset (needed by Phase 10; start it during Phase 5)
-- [ ] Keep `README.md` demo instructions current from Phase 9 onward
+- [x] Grew to the full 10-document set with deliberate conflicts, an unresolvable `UNKNOWN`, and a
+      superseded version pair (`docs/sample-enterprise/`, Phase 10, 2026-08-12)
+- [x] Wrote the 30-case evaluation dataset (`ai-service/app/evaluation/datasets/cases.json`, Phase
+      10, 2026-08-12)
+- [ ] Keep `README.md` demo instructions current from Phase 9 onward — revisit once Phase 12's
+      `make demo` exists, since the current instructions predate it
 
 ## Backlog / ideas (not committed)
 

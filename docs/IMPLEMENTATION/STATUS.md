@@ -6,7 +6,9 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 10 in progress.** Four pieces landed this session.
+**Last verified:** 2026-08-12 — **Phase 10 substantially complete; Phase 11 starting next, per
+explicit user instruction to proceed past the one item still blocked.** Five pieces landed this
+session.
 
 (1) Audited all 14 named failure-scenario tests from `.claude/rules/testing.md`: 9 were already
 covered, 5 were gaps (#2 contradictory documents, #3 two policy versions, #6 LLM timeout retry, #9
@@ -155,13 +157,44 @@ Continued down the same audit's ranked list, both genuine, previously-zero-cover
 `./mvnw verify` → 80 unit (+8 `LocalDocumentStorageTest`) + 37 integration passed, 0 failures.
 `tsc --noEmit`/`oxlint` clean, Vitest 49/49 (+5 `client.test.ts`).
 
+(5) Closed the last two items from the same coverage audit that don't require real Gemini quota:
+
+- **`ai-service/app/prompts/compose.py`** — the single place the injection-defense fragment gets
+  spliced into every agent's system prompt (`.claude/rules/security.md`) had no test at all. New
+  `tests/prompts/test_compose.py` (6 tests): every one of the 6 real agent templates, once composed,
+  contains the actual current `injection_defence.md` text verbatim, not a stale copy or a silently
+  -dropped substitution; a hardcoded template list is checked against what's actually on disk (so a
+  new template added without updating the test fails loudly); selective substitution (an agent that
+  doesn't reference `evidence_citation.md` doesn't get it, and doesn't retain the raw placeholder
+  either); and the `@lru_cache` behavior itself (cleared explicitly first, since other tests calling
+  `compose_prompt` earlier in a full run would otherwise make a stale-cache bug pass by accident).
+- **`DecisionController`/`KnowledgeController`** had no end-to-end HTTP test through the real
+  security filter chain — cross-tenant denial was previously only checked at the mocked-repository
+  unit level. New `DecisionFlowIT.java` (3 tests: create→list→get happy path, cross-tenant `404` on
+  both `GET` and the create endpoint itself) and `KnowledgeFlowIT.java` (1 test: cross-tenant search
+  denial). `KnowledgeService.search` checks workspace membership *before* ever calling out to
+  ai-service, so the cross-tenant case needed no ai-service stub — confirmed by reading the service,
+  not assumed. The successful-search path is already covered by `KnowledgeServiceTest`'s existing
+  `MockRestServiceServer`-based tests, not duplicated here. `DocumentController`'s own cross-tenant
+  case was already covered by `WorkspaceFlowIT`'s
+  `userInWorkspaceB_cannotReadWorkspaceAsDocument_returns404`, so this closes the full set.
+
+`./mvnw verify` → 80 unit + 41 integration (+4: 3 `DecisionFlowIT` + 1 `KnowledgeFlowIT`) passed, 0
+failures. `pytest` → 214/214 (+6 `test_compose.py`).
+
+**Remaining, deliberately deferred per explicit user instruction:** the real-Gemini evaluation
+baseline and the A/B model comparison (both blocked on today's free-tier quota resetting — see
+piece (3) above). Everything else in Phase 10's roadmap deliverables is done. Moving on to Phase 11
+now rather than waiting on the quota.
+
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 10 — Testing & evaluation (**in progress**) |
+| **Current phase** | Phase 11 — CI/CD (**starting**); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
 | **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
-| **Next milestone** | Phase 10 remaining: the E2E test (upload→ingest→decide→validate→escalate→approve→audit), the evaluation harness + ≥30 labelled cases, a baseline report, and an A/B model comparison |
+| **Phase 10 status** | All roadmap deliverables done except the real-Gemini evaluation baseline and A/B model comparison — both blocked on today's free-tier Gemini quota resetting. Deferred per explicit user instruction to proceed to Phase 11/12 rather than wait; will be picked up once quota allows. |
+| **Next milestone** | Phase 11: GitHub Actions pipeline (lint → unit → integration → build → Docker build → eval(mock) → security scan), branch protection, no secret ever printed in a log |
 
 ## Completed
 
@@ -1541,14 +1574,16 @@ is verified, via a full `mvn verify` (63 unit + 34 integration), `pytest` (180),
 
 ## Not started
 
-Phases 11–13. See `docs/IMPLEMENTATION/ROADMAP.md`. (Phase 10 is in progress, not in this bucket —
-see above.)
+Phase 12. See `docs/IMPLEMENTATION/ROADMAP.md`. Phase 13 (Kubernetes) is explicitly out of scope for
+this project per user instruction (2026-08-12) — the roadmap itself agrees it's optional and only
+worth doing "if 0–12 are genuinely done." Phase 11 is in progress, not in this bucket — see above.
 
 ## Blocked
 
-One Phase 9 piece is blocked on backend work: exact-chunk citation resolution (needs the chunks
-endpoint, and `EvidenceResponse` needs document name/section/page fields added). Nothing else is
-blocked — the SSE gap that previously blocked the Decision Detail page is now closed.
+Two Phase 10 items — the real-Gemini evaluation baseline and the A/B model comparison — are blocked
+on today's free-tier Gemini quota resetting (confirmed exhausted via a real `429 RESOURCE_EXHAUSTED`
+attempt, not assumed). Deliberately not waited on; Phase 11/12 work proceeds in parallel per
+explicit user instruction. Nothing else is blocked.
 
 ## Known bugs
 
@@ -1595,8 +1630,8 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 |---|---|
 | Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
 | Java unit (`*Test`, Surefire) | ✅ 80/80 (+9 `ApprovalGateTest`, +8 `LocalDocumentStorageTest`, new this phase) |
-| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 37/37 (+3 `AuditFlowIT`, new this phase — the cross-tenant fix for `GET /audit/resource/...`) |
-| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 208/208 (+9 failure-scenario gaps, +19 `tests/evaluation/test_metrics.py`) |
+| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 41/41 (+3 `AuditFlowIT`, +3 `DecisionFlowIT`, +1 `KnowledgeFlowIT`, new this phase) |
+| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 214/214 (+9 failure-scenario gaps, +19 evaluation metrics, +6 `test_compose.py`) |
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
 | Frontend (`vitest`, RTL + MSW) | ✅ 49/49 (+5 `client.test.ts`, new this phase — the 401 interceptor's refresh/retry/logout paths) |
 | Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
@@ -1621,38 +1656,26 @@ other stack is running.
 
 ## Recommended next action
 
-Continue Phase 10. Concretely, in roughly this order:
+Phase 10 is done except two explicitly-deferred, quota-blocked items (see "Blocked" above). Per
+explicit user instruction (2026-08-12), proceed to Phase 11 now rather than wait:
 
-1. ~~Commit the evaluation harness~~ — done (`2623d52`, plus a small `--case` comma-list follow-up
-   in `3f73388`).
-2. **Retry the real-Gemini baseline once the free-tier daily quota resets.** Asked the user
-   explicitly before spending quota; they chose a small representative subset (one case per
-   category, 8 of the 9 categories: `EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,
-   EVAL-024,EVAL-027`) rather than the full 30. Ran it (`make eval PROVIDER=gemini CASE=...`) —
-   **all 8 cases failed immediately with `429 RESOURCE_EXHAUSTED`.** This confirmed the harness's
-   own error handling works correctly (each failure became a clean `CaseResult.error`, not a crash —
-   `errors: 8` reported plainly in the aggregate, no silent partial success), but produced zero
-   usable numbers: today's free-tier quota was already exhausted before this run started (most
-   likely by this same session's earlier Phase 8/9 live-verification calls — a known, already-
-   documented failure mode, see Technical debt). Command to retry verbatim once quota resets:
-   `make eval PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`.
-   Once real numbers exist, write `docs/AI/EVALUATION_BASELINE.md` (date, commit,
-   `workflow_version`, `prompt_version`, model, embedding model, every metric, notes) — scoped
-   honestly as a partial baseline (8/30 categories) unless/until the full run happens.
-3. **A/B model comparison** (`docs/AI/EVALUATION.md`): compare at least two model configurations
-   (e.g. cheap-everywhere vs the heavier model on synthesis/validation) across accuracy, latency, and
-   cost, using the harness's `--provider`/settings overrides already built. Same quota consideration
-   as above — this roughly doubles the real-LLM-call cost of step 2.
-4. ~~Commit the `AuditController` cross-tenant fix~~ — done (`cb8c058`).
-5. ~~`LocalDocumentStorageTest.java` + `client.test.ts`~~ — implemented and verified (80 unit + 37
-   integration Java, 49/49 frontend), **not yet committed** — commit next.
-6. **Continue closing the remaining genuine coverage gaps** this session's audit surfaced (not yet
-   acted on): `ai-service/app/prompts/compose.py` (splices the injection-defense fragment into every
-   agent's system prompt) has no `tests/prompts/` at all; `decision/DecisionController.java`,
-   `document/DocumentController.java`, `knowledge/KnowledgeController.java` lack a `*FlowIT.java`
-   with an explicit cross-tenant `404`
-   check the way Auth/Workspace/Approval/Audit now all have — a consistency gap against an
-   established pattern that's already caught one real bug this session (the `AuditController` fix).
-
-Phase 8 itself is fully done, including live verification — nothing further needed there except the
-confidence-calibration technical debt from Phase 4/7 (unrelated, low priority, Phase 10 territory).
+1. **Commit this session's final Phase 10 pieces** (implemented and verified, not yet committed):
+   `tests/prompts/test_compose.py`, `DecisionFlowIT.java`, `KnowledgeFlowIT.java`, plus this
+   STATUS.md/TODO.md update.
+2. **Start Phase 11 — CI/CD** (`docs/IMPLEMENTATION/ROADMAP.md`): a GitHub Actions pipeline —
+   lint → unit → integration (Testcontainers) → build → Docker build → evaluation (mock provider,
+   deterministic) → security scan (`pip-audit`, `npm audit`, dependency-check, Trivy). Path-filtered
+   jobs, dependency caching, branch protection. Acceptance: green on a clean push, a deliberately
+   broken commit fails the right job, Docker images build for all three services, total runtime
+   < 15 min, secret scanning enabled, no secret ever printed in a log. Nothing in `.github/workflows/`
+   exists yet — this is a from-scratch build, not a refinement.
+3. **Then Phase 12 — Local deployment hardening**: production-style multi-stage Dockerfiles
+   (non-root, slim, healthchecked) for all three services — none exist yet; `docker-compose.prod.yml`;
+   a real `make demo`/`make migrate`/`make seed` (all three are still literal Phase 0–2 placeholder
+   stubs in the Makefile today); `docs/OPERATIONS/RUNBOOK.md`; a Postgres backup/restore script.
+4. **Phase 13 (Kubernetes) is explicitly out of scope** for this project (user instruction,
+   2026-08-12) — do not start it.
+5. Once real-Gemini quota resets, come back to the two deferred Phase 10 items: `make eval
+   PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`
+   (the representative subset already agreed with the user), then write
+   `docs/AI/EVALUATION_BASELINE.md`, then the A/B model comparison.
