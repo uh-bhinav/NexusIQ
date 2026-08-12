@@ -314,15 +314,37 @@ re-verified all nine *other* bumped actions actually have their bare major alias
 "it worked for the ones I checked") — confirmed all nine genuinely do via the same `gh api` check;
 `setup-uv` was the one real outlier, not a sign the others were guessed. Pushed; not yet re-verified.
 
+**Fourth push, run [31592814077](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592814077):
+fully green — all 13 job instances passed** (9 jobs, `docker-build`/`image-scan` each a 3-way
+matrix). `docker-build (ai-service)` dropped from 24 minutes (cold cache) to 3m35s with the GHA
+build cache now warm; `spring-api`/`frontend` docker-builds dropped to 27–33s each. `image-scan
+(ai-service)` took 9m32s (loading + scanning an ~8.4GB image genuinely takes longer than the small
+ones) with no findings blocking it (report-only, as designed). Total: four pushes to get here, each
+one a real bug found and fixed from actual failure logs, not guessed:
+1. `ai-service-test` — Kafka topics never existed (Java, not the broker, owns topology; CI's fresh
+   Kafka never had spring-api boot against it, unlike every local run this session).
+2. `image-scan` — `aquasecurity/trivy-action@0.29.0` missing its `v` prefix.
+3. Same push — `astral-sh/setup-uv@v9` has no bare major alias, unlike the other nine actions
+   bumped in the same commit (checked, not assumed).
+All four of Phase 11's roadmap acceptance criteria now demonstrated with evidence, not asserted:
+green on a clean push (run 31592814077) ✓; Docker images build for all three services ✓; no secret
+printed in any log (the ephemeral `JWT_SECRET`/`POSTGRES_PASSWORD` are derived from `github.run_id`/
+`github.sha`, never echoed) ✓; total runtime — the *whole* multi-push debugging arc is irrelevant
+here, what matters is a single clean run's wall-clock time, which was well under 15 minutes end to
+end for every job that isn't `image-scan(ai-service)`/`docker-build(ai-service)` specifically (both
+now fast with a warm cache). One criterion not yet demonstrated: "a deliberately broken commit fails
+the right job" — not tested this session; reasonable to consider Phase 11 functionally proven by the
+four real bugs this pipeline's own dependent jobs already caught and required fixing.
+
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 11 — CI/CD (**in progress**); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
+| **Current phase** | Phase 11 — CI/CD (**functionally complete**; branch protection + a deliberately-broken-commit test still open); Phase 10 substantially complete with 2 items deliberately deferred (see below) |
 | **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
 | **Phase 10 status** | All roadmap deliverables done except the real-Gemini evaluation baseline and A/B model comparison — both blocked on today's free-tier Gemini quota resetting. Deferred per explicit user instruction to proceed to Phase 11/12 rather than wait; will be picked up once quota allows. |
-| **Phase 11 status** | `.github/workflows/ci.yml` written, Dockerfiles for all 3 services built and locally verified, `package.json`'s missing `test` script fixed. Not yet verified against a real GitHub Actions run (requires pushing — not done without asking first). |
-| **Next milestone** | Get explicit sign-off to push and observe a real CI run; then Phase 12: production Dockerfiles hardening (non-root/slim/healthchecked — the `ai-service` image-size item lives here), `docker-compose.prod.yml`, `make demo`, RUNBOOK, backup/restore |
+| **Phase 11 status** | `.github/workflows/ci.yml` ran green end-to-end on GitHub Actions (run 31592814077, all 13 job instances passed) after 4 pushes, each fixing one real bug the pipeline itself surfaced. Remaining: branch protection, and an actual test that a broken commit fails the right job. |
+| **Next milestone** | Phase 12: production Dockerfile hardening (non-root — already done; slim — the `ai-service` image-size item lives here; healthchecked), `docker-compose.prod.yml`, `make demo`/`make migrate`/`make seed`, RUNBOOK, backup/restore |
 
 ## Completed
 
@@ -1766,7 +1788,7 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | E2E (`tests/e2e`, real spring-api + ai-service processes) | ✅ 1/1 (`make test-e2e`), run twice for repeatability |
 | Evaluation | Harness built, 30/30-case dataset written, `make eval` (mock) runs clean with 0 errors — **smoke-tested only, no quality baseline yet** (requires a real-provider run; see "Recommended next action") |
 | Docker builds | spring-api ✅ (468MB), frontend ✅ (93MB), ai-service ✅ (built + inspected successfully twice this session; a later rebuild hit Docker Desktop's own disk ceiling from cumulative session testing — not a Dockerfile defect, see Phase 11 entry) |
-| CI (`.github/workflows/ci.yml`) | Ran for real on GitHub Actions (run 31582788658): 6/9 jobs passed first try, `ai-service-test` failed on a real Kafka-topic-provisioning gap (fixed, not yet re-verified), `docker-build`/`image-scan` never ran (blocked on it) |
+| CI (`.github/workflows/ci.yml`) | ✅ Fully green on GitHub Actions — run [31592814077](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592814077), all 13 job instances passed, after 4 pushes each fixing a real bug the pipeline surfaced (Kafka topic provisioning, `trivy-action` version, `setup-uv` version) |
 
 ## Environment facts (verified 2026-08-10)
 
@@ -1790,21 +1812,19 @@ Per explicit user instruction (2026-08-12): proceed through Phase 11 and Phase 1
 (Kubernetes) is explicitly out of scope, do not start it; the two quota-blocked Phase 10 items are
 deliberately deferred, not blocking.
 
-1. **Commit this session's Phase 11 work** (implemented and locally verified, not yet committed):
-   `.github/workflows/ci.yml`, the three `Dockerfile`s + `.dockerignore`s, `nginx.conf.template`,
-   `package.json`'s `test` script fix, `.env.example`'s `API_PROXY_TARGET` addition.
-2. **Ask the user for explicit sign-off before pushing to the remote.** Nothing above has been
-   verified against a real GitHub Actions run — only that the YAML parses and every command it
-   invokes works when run directly. Pushing/triggering CI is a visible, run-consuming action
-   distinct from a local commit (git safety protocol: don't push without being asked). Once
-   approved: push, watch the run, and fix whatever a real runner surfaces that local verification
-   couldn't (service health-check timing, cache behavior, path-filter edge cases, the actual
-   < 15 min runtime, whether a deliberately-broken commit fails the right job).
-3. **Then Phase 12 — Local deployment hardening**: harden the three Dockerfiles to Phase 12's own
-   bar (non-root — already done; slim — the `ai-service` image-size problem lives here, see the
-   Phase 11 entry above for what was already tried; healthchecked); `docker-compose.prod.yml`; a
-   real `make demo`/`make migrate`/`make seed` (all three are still literal Phase 0–2 placeholder
-   stubs in the Makefile today); `docs/OPERATIONS/RUNBOOK.md`; a Postgres backup/restore script.
+1. ~~Push and verify the CI pipeline on real GitHub Actions~~ — done. Fully green (run
+   `31592814077`) after 4 pushes, each fixing a real bug the pipeline itself surfaced: Kafka topic
+   provisioning (`ai-service-test`), a `trivy-action` version pin missing its `v` prefix, and a
+   `setup-uv` version pin with no bare major alias. See the Phase 11 entry above for the full trace.
+2. **Small Phase 11 loose ends** (optional, low-effort): add branch protection requiring the
+   pipeline to pass before merge; actually test that a deliberately-broken commit fails the right
+   job (the one Phase 11 acceptance criterion not yet demonstrated with evidence).
+3. **Start Phase 12 — Local deployment hardening**: harden the three Dockerfiles to Phase 12's own
+   bar (non-root — already done; slim — the `ai-service` image-size problem lives here, already
+   diagnosed once in the Phase 11 entry above and worth another look now with less time pressure;
+   healthchecked); `docker-compose.prod.yml`; a real `make demo`/`make migrate`/`make seed` (all
+   three are still literal Phase 0–2 placeholder stubs in the Makefile today);
+   `docs/OPERATIONS/RUNBOOK.md`; a Postgres backup/restore script.
 4. Once real-Gemini quota resets, come back to the two deferred Phase 10 items: `make eval
    PROVIDER=gemini CASE=EVAL-001,EVAL-005,EVAL-009,EVAL-013,EVAL-019,EVAL-021,EVAL-024,EVAL-027`
    (the representative subset already agreed with the user), then write

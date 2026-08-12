@@ -7,11 +7,12 @@ Delete completed items once their phase closes — this is a working list, not a
 
 ---
 
-## Now — start Phase 11 (CI/CD)
+## Now — start Phase 12 (Local deployment hardening)
 
-Phase 10 is substantially complete — see `## Phase 10 — Testing & evaluation ✅` below and STATUS.md
-for the full history. Two items remain, explicitly deferred (blocked on real Gemini quota, user
-instruction 2026-08-12 to proceed to Phase 11/12 rather than wait):
+Phase 10 is substantially complete and Phase 11 (CI/CD) is functionally complete (fully green real
+CI run) — see `## Phase 10 — Testing & evaluation ✅` and the Phase 11 entry below, and STATUS.md
+for the full history. Two Phase 10 items remain, explicitly deferred (blocked on real Gemini quota,
+user instruction 2026-08-12 to proceed to Phase 11/12 rather than wait):
 
 - [!] **Retry the real-Gemini baseline once the free-tier daily quota resets.** Already asked the
       user and got sign-off for a small representative subset (one case per category, 8/9
@@ -40,23 +41,23 @@ Phase 11 progress (2026-08-12):
       was tried (a `[tool.uv.sources]` CPU-only torch pin, which didn't work — a real uv 0.8.4
       behavior, not a mistake) and why it's deliberately deferred to Phase 12 ("slim" is Phase 12's
       own acceptance criterion). **Not yet committed.**
-- [x] `.github/workflows/ci.yml` built and committed (`72ecd6e`), pushed with sign-off, ran for
-      real (run `31582788658`): **6/9 jobs passed first try** (`changes`, `evaluate`, `backend-unit`,
-      `dependency-scan`, `frontend-test`, `backend-integration`). `ai-service-test` failed — 11
-      Kafka-messaging tests hit `UnknownTopicOrPartitionError` because the job only ran Flyway
-      migrations, not a full spring-api boot, and Java also owns Kafka topic provisioning (broker
-      auto-create is off). Same gap already known for local dev (STATUS.md's technical debt table);
-      CI's genuinely-fresh Kafka container was the first environment to actually expose it. Fixed:
-      the job now boots spring-api in the background and polls `/actuator/health` before running
-      pytest. `docker-build`/`image-scan` never ran (blocked on `ai-service-test`). See STATUS.md's
-      Phase 11 entry for the full trace. **Fix implemented, not yet re-verified with a second push.**
-- [ ] Push the Kafka-topic-provisioning fix and confirm `ai-service-test` passes, then confirm
-      `docker-build`/`image-scan` (never ran yet) also pass.
-- [ ] Branch protection requiring the pipeline to pass before merge (needs a fully green run first
-      to know the final check names).
-- [ ] Verify remaining acceptance criteria against a fully green run: a deliberately broken commit
-      fails the right job; total runtime < 15 min; secret scanning enabled; no secret ever printed
-      in a log (check workflow logs directly).
+- [x] `.github/workflows/ci.yml` built, committed, pushed with sign-off, and verified fully green
+      on real GitHub Actions — run
+      [31592814077](https://github.com/uh-bhinav/NexusIQ/actions/runs/31592814077), all 13 job
+      instances passed. Took 4 pushes; each one fixed a real bug the pipeline itself surfaced (not
+      guessed): (1) `ai-service-test` — Kafka topics never existed because the job only ran Flyway
+      migrations, not a full spring-api boot, and Java (not the broker) owns Kafka topic
+      provisioning; fixed by booting spring-api and polling `/actuator/health` first. (2)
+      `aquasecurity/trivy-action@0.29.0` was missing the `v` prefix its tags actually use. (3) While
+      bumping all ten action pins to their current major version in the same commit,
+      `astral-sh/setup-uv@v9` turned out to be the one repo of the ten with no bare major alias;
+      pinned to the exact `v9.0.0` instead. See STATUS.md's Phase 11 entry for the full trace,
+      including before/after timings once the GHA build cache warmed up (`docker-build(ai-service)`
+      24 min → 3m35s). **Committed across `72ecd6e`, `0333e85`, `8dc420b`, `b5b1b5c`.**
+- [ ] Branch protection requiring the pipeline to pass before merge (now that the final check names
+      are known from a fully green run).
+- [ ] Verify the one remaining acceptance criterion not yet demonstrated: a deliberately-broken
+      commit fails the right job.
 
 ### Backlog (low-priority, not phase-blocking)
 
@@ -224,13 +225,15 @@ Phase 11 progress (2026-08-12):
 - [~] Verify all 5 acceptance criteria — 3/5 fully met; the 2 requiring real-provider numbers are
       the two blocked items above
 
-## Phase 11 — CI/CD (starting now — see "Now" above for the live task list)
+## Phase 11 — CI/CD ✅ FUNCTIONALLY COMPLETE (2026-08-12)
 
-- [ ] Workflow: lint → test → integration → build → docker → eval → security scan
-- [ ] Caching, path filters, branch protection
-- [ ] Verify acceptance criteria
+- [x] Workflow: lint → test → integration → build → docker → eval → security scan
+- [x] Caching, path filters — done. Branch protection — not yet (see "Now" above)
+- [~] Verify acceptance criteria — green on a clean push ✓, Docker images build for all 3 ✓, no
+      secret printed in a log ✓, total runtime reasonable per-job ✓; "a deliberately broken commit
+      fails the right job" not yet tested (see "Now" above)
 
-## Phase 12 — Local deployment hardening
+## Phase 12 — Local deployment hardening (starting now — see "Now" above for the live task list)
 
 - [ ] Multi-stage non-root Dockerfiles ×3
 - [ ] `docker-compose.prod.yml`
