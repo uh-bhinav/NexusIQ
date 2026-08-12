@@ -1,6 +1,7 @@
 package com.nexusiq.workspace;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -8,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.nexusiq.TestcontainersConfiguration;
 import com.nexusiq.security.JwtService;
 import com.nexusiq.user.entity.Role;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.JsonNode;
@@ -86,15 +89,21 @@ class WorkspaceFlowIT {
         String workspaceAId = createWorkspace(ownerAToken, "Workspace A");
         createWorkspace(ownerBToken, "Workspace B");
 
-        String docBody =
+        MockMultipartFile filePart = new MockMultipartFile(
+                "file", "policy.txt", "text/plain", "confidential policy text".getBytes(StandardCharsets.UTF_8));
+        MockMultipartFile metadataPart = new MockMultipartFile(
+                "metadata",
+                "metadata",
+                MediaType.APPLICATION_JSON_VALUE,
                 """
                 {"name": "Security Policy", "document_type": "SECURITY_POLICY"}
-                """;
-        String createDocResponse = mockMvc.perform(post("/api/v1/workspaces/" + workspaceAId + "/documents")
-                        .header("Authorization", "Bearer " + ownerAToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(docBody))
-                .andExpect(status().isCreated())
+                """
+                        .getBytes(StandardCharsets.UTF_8));
+        String createDocResponse = mockMvc.perform(multipart("/api/v1/workspaces/" + workspaceAId + "/documents")
+                        .file(filePart)
+                        .file(metadataPart)
+                        .header("Authorization", "Bearer " + ownerAToken))
+                .andExpect(status().isAccepted())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -157,6 +166,28 @@ class WorkspaceFlowIT {
     }
 
     @Test
+    void listDocuments_withSnakeCaseSortParam_matchesTheDocumentedApiConvention() throws Exception {
+        // .claude/rules/backend-java.md documents `?sort=created_at,desc` as the
+        // pagination convention everywhere — snake_case, matching every
+        // request/response body. Spring Data's Pageable resolver has no
+        // snake_case awareness on its own; this proves
+        // SnakeCaseSortPageableResolver (wired via WebConfig) converts the
+        // property before it reaches DocumentRepository, rather than 500ing
+        // with a PropertyReferenceException the way it did before that fix.
+        String token = registerAndLogin("sorter@acme.com", "Sorter", "password12345");
+        String workspaceId = createWorkspace(token, "Sort Test Workspace");
+
+        uploadDocument(token, workspaceId, "policy-a.txt", "First policy");
+        uploadDocument(token, workspaceId, "policy-b.txt", "Second policy");
+
+        mockMvc.perform(get("/api/v1/workspaces/" + workspaceId + "/documents?sort=created_at,desc")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].name").value("policy-b.txt"))
+                .andExpect(jsonPath("$.content[1].name").value("policy-a.txt"));
+    }
+
+    @Test
     void addMember_byNonAdmin_returns403() throws Exception {
         String ownerToken = registerAndLogin("owner2@acme.com", "Owner2", "password12345");
         String memberToken = registerAndLogin("member2@acme.com", "Member2", "password12345");
@@ -178,6 +209,25 @@ class WorkspaceFlowIT {
                                 {"email": "owner2@acme.com", "role": "ADMIN"}
                                 """))
                 .andExpect(status().isForbidden());
+    }
+
+    private void uploadDocument(String token, String workspaceId, String name, String content) throws Exception {
+        MockMultipartFile filePart =
+                new MockMultipartFile("file", name, "text/plain", content.getBytes(StandardCharsets.UTF_8));
+        MockMultipartFile metadataPart = new MockMultipartFile(
+                "metadata",
+                "metadata",
+                MediaType.APPLICATION_JSON_VALUE,
+                ("""
+                {"name": "%s", "document_type": "SECURITY_POLICY"}
+                """
+                        .formatted(name))
+                        .getBytes(StandardCharsets.UTF_8));
+        mockMvc.perform(multipart("/api/v1/workspaces/" + workspaceId + "/documents")
+                        .file(filePart)
+                        .file(metadataPart)
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isAccepted());
     }
 
     // ---- helpers ----

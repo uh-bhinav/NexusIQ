@@ -1,3 +1,45 @@
+spring:
+  # bootstrap-servers is overridden by TestcontainersConfiguration's
+  # @ServiceConnection Kafka container regardless of what's set here; the
+  # producer/consumer settings below are plain properties with no
+  # ServiceConnection equivalent, so — like nexusiq.jwt/cors below — they must
+  # be duplicated here: this file fully shadows src/main/resources/application.yml
+  # for tests (same classpath location, test-classes precedes classes), it does
+  # not layer on top of it.
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Was missing here entirely — meaning schema-validation drift (entity
+      # mapping vs actual DDL) was never caught by any test this whole
+      # project, only by booting the real app against a real (non-ephemeral)
+      # database. Confirmed empirically: this exact gap hid a real citext/
+      # varchar mismatch on users.email (see User.java) until Phase 2's live
+      # verification. Must mirror main's application.yml.
+      ddl-auto: validate
+
+  kafka:
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    consumer:
+      group-id: nexusiq-api-test
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
+
+# Phase 8: no real collector runs in the Testcontainers test context — sampling
+# 0 keeps span creation itself testable (TestSpanExporter/manual Tracer calls
+# still work) without the async OTLP HTTP exporter spending time on doomed
+# connection attempts every test run.
+management:
+  tracing:
+    sampling:
+      probability: 0.0
+
 nexusiq:
   jwt:
     # 32+ bytes required by JwtService.init() — fixed value here only so tests are
@@ -7,6 +49,21 @@ nexusiq:
     refresh-ttl-seconds: 604800
   cors:
     allowed-origins: http://localhost:5173
+  storage:
+    provider: local
+    local-path: ./target/test-documents
+    max-upload-mb: 25
+  ai-service:
+    base-url: http://ai-service-test
+    internal-token: "test-only-internal-token"
+  hitl:
+    # src/test/resources/application.yml fully shadows the main one rather
+    # than layering on top of it (Phase 2's documented gotcha) — every
+    # nexusiq.* block needed by a test must be duplicated here, not just
+    # relied on from src/main/resources. Same defaults as main.
+    escalate-on-risk: HIGH
+    min-confidence: 0.75
+    min-evidence-coverage: 0.80
 
 logging:
   level:

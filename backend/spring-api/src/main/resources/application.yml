@@ -26,10 +26,36 @@ spring:
         order_inserts: true
         order_updates: true
 
+  servlet:
+    multipart:
+      # Enforced by the servlet container while parsing, before the whole part
+      # is buffered (.claude/rules/security.md "reject oversize before buffering
+      # the whole body") — the app-level MAX_UPLOAD_MB check backs this up.
+      max-file-size: ${MAX_UPLOAD_MB:25}MB
+      max-request-size: ${MAX_UPLOAD_MB:25}MB
+
   flyway:
     enabled: true
     baseline-on-migrate: false
     locations: classpath:db/migration
+
+  kafka:
+    # Defaults assume the app runs on the host (docs/OPERATIONS/LOCAL_DEV.md:
+    # "KAFKA_BOOTSTRAP_SERVERS=localhost:29093 in your local .env"), matching the
+    # datasource default above. Override for in-container deployment (Phase 12).
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29093}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_API:nexusiq-api}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual
 
 nexusiq:
   jwt:
@@ -38,6 +64,28 @@ nexusiq:
     refresh-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  ai-service:
+    # Host-friendly default (same convention as datasource/kafka above);
+    # .env.example's http://ai-service:8000 is the container-network value.
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+  storage:
+    provider: ${STORAGE_PROVIDER:local}
+    # Absolute, not CWD-relative: spring-api and ai-service resolve this
+    # independently, on the host they're launched from different working
+    # directories (backend/spring-api vs ai-service) — a relative default
+    # would silently point each service at a different directory. /tmp is
+    # writable with no setup on any dev machine; real deployments (Phase 12)
+    # set STORAGE_LOCAL_PATH explicitly to a shared mounted volume path.
+    local-path: ${STORAGE_LOCAL_PATH:/tmp/nexusiq-documents}
+    max-upload-mb: ${MAX_UPLOAD_MB:25}
+  hitl:
+    # ADR-006's threshold matrix. ai-service's approval_router_node mirrors
+    # these exact names/defaults to decide whether to suspend the graph —
+    # keep both sides in sync when tuning.
+    escalate-on-risk: ${HITL_ESCALATE_ON_RISK:HIGH}
+    min-confidence: ${HITL_MIN_CONFIDENCE:0.75}
+    min-evidence-coverage: ${HITL_MIN_EVIDENCE_COVERAGE:0.80}
 
 server:
   port: ${API_PORT:8080}
@@ -53,6 +101,20 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+  # Phase 8 / ADR-007. probability 1.0: this is a local demo stack, not a
+  # production system with sampling-cost concerns — every trace matters for
+  # demonstrability. Spring Boot's OTLP tracing autoconfiguration is HTTP-only
+  # (management.otlp.tracing.endpoint expects the full /v1/traces URL against
+  # the collector's OTLP *HTTP* receiver) — deliberately the HTTP port
+  # (4328/4318), not the gRPC one ai-service uses (4327/4317); the two
+  # services use different OTLP transports against the same collector, both
+  # valid per the OTLP spec.
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_HTTP_ENDPOINT:http://localhost:4328}/v1/traces
 
 springdoc:
   swagger-ui:

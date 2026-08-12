@@ -20,9 +20,14 @@ public class User {
     @Id
     private UUID id;
 
-    // citext at the DB layer; Hibernate treats it as a plain string.
+    // citext at the DB layer; Hibernate treats it as a plain string for
+    // reads/writes (@JdbcTypeCode) but its schema *validator* separately
+    // derives an expected DDL type from the mapping and needs
+    // columnDefinition to know citext is what's really there — without it,
+    // ddl-auto: validate fails at startup against a real (non-Testcontainers)
+    // database with "found [citext], but expecting [varchar(255)]".
     @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true, columnDefinition = "citext")
     private String email;
 
     @Column(nullable = false)

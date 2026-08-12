@@ -86,4 +86,20 @@ class JwtServiceTest {
 
         assertThat(service.parseAndValidate(token)).isEmpty();
     }
+
+    @Test
+    void issuedStreamToken_isScopedToItsDecisionId_notAnyOther() {
+        JwtService service = new JwtService(new JwtProperties(VALID_SECRET, 3600, 604800));
+        service.init();
+
+        UUID decisionId = UUID.randomUUID();
+        String token = service.issueStreamToken(UUID.randomUUID(), "user@example.com", "ANALYST", decisionId);
+
+        var claims = service.parseAndValidate(token).orElseThrow();
+        assertThat(service.isStreamTokenForDecision(claims, decisionId)).isTrue();
+        assertThat(service.isStreamTokenForDecision(claims, UUID.randomUUID())).isFalse();
+        // A stream token must not double as a general-purpose bearer token.
+        assertThat(service.isAccessToken(claims)).isFalse();
+        assertThat(service.isRefreshToken(claims)).isFalse();
+    }
 }
