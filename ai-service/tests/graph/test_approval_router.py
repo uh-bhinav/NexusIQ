@@ -91,9 +91,9 @@ class _ViolatedFindingProvider(MockProvider):
         )
 
 
-def _recommendation(confidence: float) -> Recommendation:
+def _recommendation(confidence: float, recommendation: str = "APPROVE") -> Recommendation:
     return Recommendation(
-        recommendation="APPROVE",
+        recommendation=recommendation,  # type: ignore[arg-type]
         reasoning_summary="Findings support approval.",
         confidence=confidence,
         key_evidence_ids=[],
@@ -203,3 +203,47 @@ async def test_fullGraph_violatedFinding_interrupts_regardlessOfConfidence():
     final_state = await graph.ainvoke(state, {"configurable": {"thread_id": decision_id}})
 
     assert "__interrupt__" in final_state
+
+
+@pytest.mark.asyncio
+async def test_fullGraph_conflictingEvidence_interrupts_regardlessOfConfidence():
+    # .claude/rules/testing.md failure scenario #2: "Contradictory documents
+    # -> conflict identified, escalated to human." CONFLICTING_EVIDENCE is
+    # the schema's honest way to express that outcome (was missing from the
+    # enum entirely until this fix — .claude/rules/ai-service.md: "Enums
+    # must include the honest options... A schema that forces a binary
+    # answer is a bug"). Deliberately high confidence (0.95) — this must be
+    # the recommendation value itself triggering escalation, not a
+    # coincidence of low_confidence also firing, mirroring how
+    # test_fullGraph_violatedFinding_interrupts_regardlessOfConfidence
+    # isolates its own trigger.
+    workspace_id = await _seed_security_policy_workspace()
+    settings = get_settings().model_copy(update={"retrieval_min_similarity": 0.0})
+    provider = _OverrideRecommendationProvider(
+        _FIXTURES_DIR, _recommendation(0.95, recommendation="CONFLICTING_EVIDENCE")
+    )
+    tracer, _ = get_in_memory_tracer()
+    checkpointer = InMemorySaver()
+
+    deps = GraphDeps(
+        settings=settings,
+        provider=provider,
+        producer=_NullProducer(),  # type: ignore[arg-type]
+        tracer=tracer,
+        workspace_id=workspace_id,
+        correlation_id=None,
+    )
+    graph = build_graph(deps, checkpointer)
+    decision_id = str(uuid.uuid4())
+    state = initial_state(
+        decision_id,
+        str(workspace_id),
+        "",
+        "Should Vendor Alpha be approved for EU production?",
+        "v1",
+    )
+    final_state = await graph.ainvoke(state, {"configurable": {"thread_id": decision_id}})
+
+    assert "__interrupt__" in final_state
+    assert final_state["recommendation"].recommendation == "CONFLICTING_EVIDENCE"
+    assert final_state["recommendation"].confidence == 0.95

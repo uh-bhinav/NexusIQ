@@ -362,7 +362,7 @@ _RISK_ORDINAL = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
 
 async def approval_router_node(state: DecisionState, deps: GraphDeps) -> dict[str, Any]:
-    """Mirrors spring-api's ApprovalGate (ADR-006) exactly — same six
+    """Mirrors spring-api's ApprovalGate (ADR-006) exactly — same seven
     triggers, same threshold names — to decide whether to suspend this run
     via `interrupt()`. Java's own gate, evaluated independently against the
     same decision.completed payload, remains authoritative for the actual
@@ -395,6 +395,12 @@ async def approval_router_node(state: DecisionState, deps: GraphDeps) -> dict[st
     validator_escalated = (
         validation_result is not None and validation_result.recommended_action == "ESCALATE"
     )
+    # .claude/rules/testing.md failure scenario #2: unlike
+    # INSUFFICIENT_INFORMATION (a complete, honest answer needing no human
+    # follow-up unless another trigger also fires), CONFLICTING_EVIDENCE
+    # means the system found two equally-authoritative sources that
+    # disagree and could not resolve it alone — that always needs a human.
+    conflicting_evidence = state["recommendation"].recommendation == "CONFLICTING_EVIDENCE"
 
     requires_approval = (
         any_violated
@@ -403,6 +409,7 @@ async def approval_router_node(state: DecisionState, deps: GraphDeps) -> dict[st
         or low_confidence
         or low_coverage
         or validator_escalated
+        or conflicting_evidence
     )
 
     if requires_approval:

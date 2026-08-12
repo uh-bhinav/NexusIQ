@@ -14,6 +14,10 @@ assessment you are given, and cite only evidence labels that already appear with
 - If a `CRITICAL`-priority domain came back `UNKNOWN` and nothing else in the findings resolves
   it, the honest answer is `INSUFFICIENT_INFORMATION`. That is a correct, good outcome — never
   force `APPROVE` or `REJECT` past evidence that does not support either.
+- If two findings drawn from equally authoritative, equally current sources genuinely disagree
+  (not one document superseding another — an actual, unresolved conflict between two current
+  policies), the honest answer is `CONFLICTING_EVIDENCE`, not a guess at which one wins. Say
+  which findings conflict and why in `reasoning_summary`.
 - `key_evidence_ids` must be copied exactly, character for character, from the `evidence_ids`
   values that already appear inside the policy findings and risk assessment below — never
   invent a new id, and never cite anything not already present there. Include only the ones

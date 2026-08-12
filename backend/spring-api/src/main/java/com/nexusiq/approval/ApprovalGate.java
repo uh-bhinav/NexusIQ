@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * every trigger is a direct comparison against a persisted, structured value.
  *
  * <p>ai-service's {@code approval_router_node} mirrors this exact rule (same
- * six triggers, same threshold names) to decide whether to suspend the
+ * seven triggers, same threshold names) to decide whether to suspend the
  * LangGraph run via {@code interrupt()} — but this gate is authoritative for
  * the actual approval record; Python's copy only controls execution, never
  * approval state (ADR-006: "Java owns authority... LangGraph owns execution").
@@ -70,6 +70,18 @@ public class ApprovalGate {
 
         if (Boolean.TRUE.equals(payload.validationEscalated())) {
             reasons.add("Validator escalated after MAX_AGENT_ITERATIONS");
+        }
+
+        // .claude/rules/testing.md failure scenario #2: "Contradictory
+        // documents -> conflict identified, escalated to human." Unlike
+        // INSUFFICIENT_INFORMATION (a complete, honest answer that needs no
+        // human follow-up unless another trigger also fires), a
+        // CONFLICTING_EVIDENCE recommendation means the system found two
+        // equally-authoritative sources that disagree and could not resolve
+        // it on its own — that always needs a human, not only when
+        // confidence/risk/coverage also happen to cross a threshold.
+        if ("CONFLICTING_EVIDENCE".equals(payload.recommendation())) {
+            reasons.add("recommendation=CONFLICTING_EVIDENCE");
         }
 
         return new GateResult(!reasons.isEmpty(), reasons);

@@ -73,7 +73,16 @@ class RiskAssessment(BaseModel):
 
 
 class Recommendation(BaseModel):
-    recommendation: Literal["APPROVE", "CONDITIONAL_APPROVAL", "REJECT", "INSUFFICIENT_INFORMATION"]
+    # .claude/rules/ai-service.md: "Enums must include the honest options:
+    # UNKNOWN, INSUFFICIENT_INFORMATION, CONFLICTING_EVIDENCE. A schema that
+    # forces a binary answer is a bug." CONFLICTING_EVIDENCE was missing
+    # entirely until this point — confirmed via .claude/rules/testing.md's
+    # failure scenario #2 ("contradictory documents"), which had no valid
+    # way to express its own outcome.
+    recommendation: Literal[
+        "APPROVE", "CONDITIONAL_APPROVAL", "REJECT", "INSUFFICIENT_INFORMATION",
+        "CONFLICTING_EVIDENCE",
+    ]
     reasoning_summary: str
     confidence: float = Field(ge=0, le=1)
     key_evidence_ids: list[str]

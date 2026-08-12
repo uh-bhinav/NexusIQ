@@ -6,28 +6,38 @@ every session.** If this file and the repository disagree, the repository is rig
 ---
 
 **Last updated:** 2026-08-12
-**Last verified:** 2026-08-12 — **Phase 9 complete and fully live-verified.** All 9 pages built, all
-7 acceptance criteria met with real-browser evidence against the live stack (not just RTL/MSW):
-the full spec §8 12-step demo is performable from the UI alone except step 7 (deferred to Phase 10
-by design — the fuller conflicting-evidence corpus doesn't exist yet), SSE live updates plus a
-directly-tested reconnect/backoff/terminal-close path, citations resolving to the exact chunk,
-role-appropriate visibility enforced both client- and server-side, and zero mock data anywhere.
-Four real bugs were found and fixed via live verification alone — none of them would have been
-caught by the mocked test suite: a missing decision-request audit event, a systemic
-`.nullable()`/`ALL_NON_NULL` Jackson schema mismatch that silently crashed pages on any
-real-world null, a `DecisionService` role-check that read the wrong (global, not workspace-level)
-role, and a documented pagination convention that 500'd on every endpoint. `./mvnw verify` → 63
-unit + 34 integration passed. `tsc -b`/`vite build`/`oxlint`/Vitest all clean (44/44 frontend
-tests). The entire project (previously mostly uncommitted from Phase 2 onward) is now committed to
-git in 9 phase-grouped commits. Starting Phase 10 (Testing & evaluation) next.
+**Last verified:** 2026-08-12 — **Phase 10 in progress.** Audited all 14 named failure-scenario
+tests from `.claude/rules/testing.md`: 9 were already covered, 5 were gaps (#2 contradictory
+documents, #3 two policy versions, #6 LLM timeout retry, #9 Kafka consumer failure×3→DLQ, #14 Redis
+unavailable) — all 5 now closed. Closing #2 surfaced a real, previously-undetected bug: the
+`recommendation` enum was missing `CONFLICTING_EVIDENCE` entirely across Python/Java/the DB/the
+frontend, directly violating `.claude/rules/ai-service.md`'s "enums must include the honest
+options" mandate — there was no valid way for the system to express "these two policies genuinely
+disagree." Fixed full-stack: Python `Recommendation` schema + `decision_v1.md` prompt guidance +
+`approval_router_node`'s new 7th (unconditional) escalation trigger; Java `RecommendationType` enum
++ `ApprovalGate`'s mirrored 7th trigger + a new `V10` migration widening the `decisions` CHECK
+constraint (V8 is immutable once shipped, per `.claude/rules/database.md`); frontend
+`RecommendationType` Zod schema. Also wrote `ApprovalGateTest.java` — this deterministic gate,
+exactly the kind of logic `.claude/rules/testing.md` prioritizes for heavy unit testing, previously
+had zero direct unit tests (only indirect coverage via 2 ITs); it now has 9, one per trigger plus a
+clean-payload negative case and an `INSUFFICIENT_INFORMATION`-doesn't-alone-escalate case proving
+the asymmetry with `CONFLICTING_EVIDENCE` is deliberate. Also rebuilt `docs/sample-enterprise/`
+from 4 starter documents to the full 10-document, 7-subdirectory corpus specified in
+`docs/PROJECT_SPEC.md` §9 (genuinely conflicting policy versions, an `UNKNOWN`-case vendor doc, a
+clean approval case, a historical rejection, an incident report, an injection attempt) — this
+unblocks both the scenario #2/#3 tests and the not-yet-started evaluation harness. V10 applied and
+verified against the live local Postgres (`\d decisions` confirms the widened constraint).
+`./mvnw verify` → 72 unit + 34 integration passed (0 failures/errors). `pytest` → 189/189 passed.
+`tsc --noEmit`/Vitest clean (44/44 frontend tests). All work in this entry is implemented and
+verified but **not yet committed** — see "Recommended next action".
 
 ## Current position
 
 | | |
 |---|---|
-| **Current phase** | Phase 10 — Testing & evaluation (**starting**) |
+| **Current phase** | Phase 10 — Testing & evaluation (**in progress**) |
 | **Completed phases** | Phase 0 — Repository & environment ✅ · Phase 1 — Java backend foundation ✅ · Phase 2 — Document ingestion ✅ · Phase 3 — RAG retrieval ✅ · Phase 4 — Intent agent ✅ · Phase 5 — LangGraph multi-agent workflow ✅ · Phase 6 — Validation & guardrails ✅ · Phase 7 — Human approval ✅ · Phase 8 — Observability ✅ · Phase 9 — Frontend ✅ (all 9 pages, all 7 acceptance criteria met with live-browser evidence; see the Phase 9 entry below for the full trace, including 4 real bugs found and fixed via live verification that no mocked test suite could have caught) |
-| **Next milestone** | Phase 10: close the 14 named failure-scenario tests, an E2E test, the evaluation harness + ≥30 labelled cases, a baseline report, and an A/B model comparison |
+| **Next milestone** | Phase 10 remaining: the E2E test (upload→ingest→decide→validate→escalate→approve→audit), the evaluation harness + ≥30 labelled cases, a baseline report, and an A/B model comparison |
 
 ## Completed
 
@@ -842,6 +852,86 @@ from `__name__` regex tolerance to these exact names.
 
 ## In progress
 
+**Phase 10 — Testing & evaluation (2026-08-12, IN PROGRESS).**
+
+Started by auditing the 14 named failure scenarios in `.claude/rules/testing.md` against the
+existing suites: 9 already had a named test, 5 were gaps. Closed all 5:
+
+- **#14 Redis unavailable** — `ai-service/tests/retrieval/test_orchestrator.py`:
+  `test_search_redisUnavailable_stillReturnsResultsFromPostgres`, forcing a real connection failure
+  (`settings.model_copy(update={"redis_host": "localhost", "redis_port": 1})`, not a mock) and
+  asserting results still come back from Postgres.
+- **#6 LLM timeout → bounded retry** — new file `ai-service/tests/llm/test_gemini_provider.py` (5
+  tests), directly exercising `GeminiProvider._call_with_retries`'s retry/backoff by mocking
+  `self._client.aio.models.generate_content` via `AsyncMock`.
+- **#9 Kafka consumer failure ×3 → DLQ** — `ai-service/tests/messaging/test_consumer.py`:
+  `test_handleMessage_transientFailureThreeTimes_routesToDlqAndPublishesFailed`. First attempt
+  patched `asyncio.sleep` globally, which broke aiokafka's internal timers and hung the test
+  indefinitely (had to `kill -9` the process) — fixed by patching the module-level
+  `BACKOFF_SECONDS` constant instead of touching global `asyncio` internals.
+- **#3 two policy versions** — `ai-service/tests/retrieval/test_context.py`:
+  `test_assembleContext_twoVersionsOfSameDocument_currentIsExplicitlyLabelledOverSuperseded`,
+  proving `_format_entry`'s `(CURRENT, ...)`/`(SUPERSEDED, ...)` labelling genuinely distinguishes
+  two versions of the same document with real conflicting content visible in context.
+- **#2 contradictory documents → escalate** — the one gap that wasn't just a missing test. There
+  was no dedicated document-vs-document conflict detector to test (the validator's CONTRADICTION
+  check is recommendation-vs-findings, not document-vs-document), and investigating *why* led to
+  discovering `Recommendation.recommendation` (Python), `RecommendationType` (Java), the
+  `decisions_recommendation_check` DB constraint, and the frontend's `RecommendationType` Zod enum
+  all lacked `CONFLICTING_EVIDENCE` — a genuine, previously-shipped violation of
+  `.claude/rules/ai-service.md`'s "enums must include the honest options" rule, and of
+  `.claude/rules/testing.md` scenario #2's own wording ("conflict identified, escalated to human"),
+  which had no valid value to express its own required outcome. Fixed full-stack:
+  - `ai-service/app/models/agents.py` — added `CONFLICTING_EVIDENCE` to the `Recommendation`
+    Literal.
+  - `ai-service/app/prompts/decision_v1.md` — new bullet instructing the LLM when a genuine,
+    unresolved conflict between two equally-authoritative current sources (not one superseding the
+    other) is the honest answer.
+  - `ai-service/app/graph/nodes.py` — `approval_router_node` gained a 7th, **unconditional**
+    escalation trigger for `recommendation == "CONFLICTING_EVIDENCE"`, deliberately asymmetric with
+    `INSUFFICIENT_INFORMATION` (a complete, honest terminal answer that does *not* alone escalate).
+  - `backend/spring-api/.../decision/entity/RecommendationType.java` — added the enum value.
+  - `backend/spring-api/.../approval/ApprovalGate.java` — mirrored the same 7th trigger (this class
+    and `approval_router_node` are required to match exactly, per both classes' own docstrings).
+  - `backend/spring-api/.../db/migration/V10__add_conflicting_evidence_recommendation.sql` — new
+    migration (V8's original constraint is immutable once shipped, per
+    `.claude/rules/database.md` — this widens it rather than editing V8). Applied and verified
+    against the live local Postgres: `flyway_schema_history` shows V10 `success=t`, and `\d
+    decisions` shows the widened `decisions_recommendation_check`.
+  - `frontend/web/src/api/schemas.ts` — added the value to the `RecommendationType` Zod enum.
+  - Tests: `ai-service/tests/graph/test_approval_router.py` gained
+    `test_fullGraph_conflictingEvidence_interrupts_regardlessOfConfidence` (confidence deliberately
+    0.95, to isolate the trigger from `low_confidence`). New
+    `backend/spring-api/.../approval/ApprovalGateTest.java` — this deterministic gate had **zero**
+    direct unit tests before this (only indirect coverage via `ApprovalFlowIT`/
+    `DecisionEventConsumersIT`), despite being exactly the kind of logic
+    `.claude/rules/testing.md` prioritizes for heavy unit testing. 9 tests: one per trigger (policy
+    violated, prompt injection, risk≥threshold, confidence<threshold, coverage<threshold, validator
+    escalated, conflicting evidence), a clean-payload negative case, and an
+    `INSUFFICIENT_INFORMATION`-alone-does-not-escalate case proving the asymmetry is deliberate,
+    not an accidental "any non-APPROVE escalates" rule.
+
+Also rebuilt `docs/sample-enterprise/` from the 4-document Phase 2 starter set to the full
+10-document, 7-subdirectory corpus specified in `docs/PROJECT_SPEC.md` §9: `security/` (two
+genuinely conflicting security-policy versions, v2 explicitly superseding and tightening v1's data
+residency terms), `compliance/` (EU data-residency + GDPR policy), `procurement/` (vendor-approval
+policy), `architecture/` (production architecture standard), `vendors/` (an injection-attempt
+report, a data-processing doc deliberately silent on region for the `UNKNOWN` case, and a clean
+approval case), `historical/` (a rejected prior decision with reasons), `incidents/` (a vendor
+outage report). This unblocks the not-yet-started evaluation harness (needs ≥30 labelled cases) as
+well as scenario #2/#3 above.
+
+Verification: `./mvnw verify` → 72 unit (+9 `ApprovalGateTest`) + 34 integration passed, 0
+failures/errors. `pytest` → 189/189 passed (+9: 1 Redis, 5 Gemini retry, 1 Kafka DLQ, 1 context
+versioning, 1 conflicting-evidence routing). `tsc --noEmit`/Vitest clean, 44/44 frontend tests.
+
+Not yet done this phase: the E2E test spanning the full spine (upload→ingest→decide→validate→
+escalate→approve→audit — confirmed via an earlier audit that no such cross-service test currently
+exists), the evaluation harness itself (retrieval recall@k/precision@k/MRR, generation groundedness/
+citation validity, decision accuracy — `docs/AI/EVALUATION.md`), ≥30 labelled cases, a baseline
+report, and an A/B model comparison. All of this phase's work described above is implemented and
+verified but **not yet committed to git**.
+
 **Phase 9 — Frontend (2026-08-11 to 2026-08-12, COMPLETE).**
 
 Scaffold (`frontend/web`): Vite + React 19 + TypeScript strict + Tailwind v4 (`@tailwindcss/vite`,
@@ -1272,7 +1362,7 @@ is verified, via a full `mvn verify` (63 unit + 34 integration), `pytest` (180),
 
 ## Not started
 
-Phases 10–13. See `docs/IMPLEMENTATION/ROADMAP.md`. (Phase 9 is in progress, not in this bucket —
+Phases 11–13. See `docs/IMPLEMENTATION/ROADMAP.md`. (Phase 10 is in progress, not in this bucket —
 see above.)
 
 ## Blocked
@@ -1283,7 +1373,10 @@ blocked — the SSE gap that previously blocked the Decision Detail page is now 
 
 ## Known bugs
 
-None currently open as defects in shipped behavior. `decision.progress.dlq` /
+None currently open as defects in shipped behavior. The `CONFLICTING_EVIDENCE` enum gap described
+in the Phase 10 entry above was a real, confirmed, previously-shipped bug — it is now fixed
+full-stack (Python/Java/DB/frontend) and verified; recorded here for the historical record, not as
+an open item. `decision.progress.dlq` /
 `decision.requested.dlq` / `document.processed.dlq` in the local dev Kafka broker contain messages
 accumulated from live-verification attempts and the Python test suite (which runs against the real
 local broker, not an isolated one) — confirmed by inspecting their `kafka_dlt-exception-*` headers
@@ -1323,13 +1416,13 @@ None open. The pgvector tenant-filtering strategy question from Phase 3 is resol
 | Suite | State |
 |---|---|
 | Stack verification | ✅ 19/19 (`make verify`, Phase 0) |
-| Java unit (`*Test`, Surefire) | ✅ 63/63 (+4 `TraceContextPropagationTest`, +1 `JwtServiceTest`, +5 `SseEmitterRegistryTest`, +1 `DecisionServiceTest` audit-event case, +4 `SnakeCaseSortPageableResolverTest`) |
-| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 34/34 (+1 `WorkspaceFlowIT` sort-convention case) |
-| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 180/180 (+5 `tests/api/test_chunks.py`) |
+| Java unit (`*Test`, Surefire) | ✅ 72/72 (+9 `ApprovalGateTest`, new this phase — all 7 `ApprovalGate` triggers plus a clean-payload and an `INSUFFICIENT_INFORMATION` negative case) |
+| Java integration (`*IT`, Failsafe, Testcontainers) | ✅ 34/34 |
+| Python (`pytest`, real local Postgres + Kafka + Redis) | ✅ 189/189 (+9 this phase: Redis-unavailable retrieval, 5 Gemini retry/backoff, Kafka DLQ-after-3, two-policy-version context labelling, conflicting-evidence routing) |
 | Python lint/type (`ruff`, `mypy --strict`) | ✅ clean |
-| Frontend (`vitest`, RTL + MSW) | ✅ 40/40 (9 pages × populated/empty/error[/primary-action], +document-upload and +member-management coverage on Knowledge Base / Dashboard, +2 `ApprovalQueuePage` workspace-vs-global-role regression cases) |
-| Frontend type/lint/build (`tsc -b`, `oxlint`, `vite build`) | ✅ clean |
-| Evaluation | No dataset yet (Phase 10) |
+| Frontend (`vitest`, RTL + MSW) | ✅ 44/44 |
+| Frontend type/lint/build (`tsc --noEmit`, `vite build`) | ✅ clean |
+| Evaluation | No dataset yet — corpus now ready (10 docs, Phase 10 remaining work) |
 
 ## Environment facts (verified 2026-08-10)
 
@@ -1349,17 +1442,19 @@ other stack is running.
 
 ## Recommended next action
 
-Continue Phase 9. Concretely, in roughly this order:
+Continue Phase 10. Concretely, in roughly this order:
 
-1. **Add the chunk-fetch endpoint** (`GET /workspaces/{id}/documents/{documentId}/chunks`) and add
-   document name/section/page fields to `EvidenceResponse` so evidence citations can resolve to the
-   exact chunk, not just the citation-reference string. Unblocks AC3.
-2. **Build the last page**: Document detail (needed to link evidence citations *to*, and one of the
-   9 required pages) — same populated/empty/error test coverage the other 8 pages already have.
-3. Once the Chrome extension is connected: an actual browser click-through of the full spec §8 demo
-   — `.env` access and a real backend are both already available and proven working (this session
-   drove the real REST API, the real SSE stream, and every remaining resource endpoint directly via
-   `curl`), so this is genuinely only blocked on the browser tool now.
+1. **Commit this phase's work** (currently implemented and fully verified, but uncommitted — see
+   the Phase 10 entry above): the 5 failure-scenario-gap tests, the full-stack `CONFLICTING_EVIDENCE`
+   fix (Python/Java/`V10` migration/frontend), `ApprovalGateTest.java`, and the rebuilt
+   `docs/sample-enterprise/` corpus.
+2. **The E2E test** — upload→ingest→decide→validate→escalate→approve→audit, spanning all three
+   services. Confirmed via an earlier audit that nothing like this currently exists.
+3. **The evaluation harness** (`docs/AI/EVALUATION.md`): ≥30 labelled cases (the corpus rebuilt this
+   phase should make this concrete rather than synthetic), retrieval metrics (recall@5, recall@10,
+   precision@5, MRR), generation metrics (groundedness, citation validity, hallucination rate),
+   decision metrics (recommendation accuracy, policy-status accuracy, escalation precision/recall),
+   a baseline report, and an A/B model comparison.
 
 Phase 8 itself is fully done, including live verification — nothing further needed there except the
 confidence-calibration technical debt from Phase 4/7 (unrelated, low priority, Phase 10 territory).

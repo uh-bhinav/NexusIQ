@@ -12,17 +12,26 @@ Delete completed items once their phase closes — this is a working list, not a
 Phase 9 is closed — see `## Phase 9 — Frontend ✅ COMPLETE` below and STATUS.md's Phase 9 entry for
 the full history (kept there per this file's own "delete completed items" convention).
 
-- [ ] Orient: read `ROADMAP.md`'s Phase 10 section in full, plus `.claude/rules/testing.md` and
+- [x] Orient: read `ROADMAP.md`'s Phase 10 section in full, plus `.claude/rules/testing.md` and
       `docs/TESTING/STRATEGY.md`, before writing anything.
-- [ ] Close coverage gaps in all three services (Java/Python/frontend) — identify what's
+- [x] All 14 named failure-scenario tests from `.claude/rules/testing.md` §"Failure scenarios that
+      must have tests" — audited (9 already covered), closed the 5 gaps (#2 contradictory
+      documents, #3 two policy versions, #6 LLM timeout retry, #9 Kafka consumer failure×3→DLQ,
+      #14 Redis unavailable). #2 surfaced and fixed a genuine full-stack bug: `CONFLICTING_EVIDENCE`
+      was missing from the `recommendation` enum in Python/Java/DB/frontend. See STATUS.md's
+      Phase 10 entry for the full detail. **Not yet committed.**
+- [x] Rebuilt `docs/sample-enterprise/` to the full 10-document, 7-subdirectory corpus per
+      `docs/PROJECT_SPEC.md` §9 — unblocks the evaluation dataset below and spec §8 step 7's
+      `UNKNOWN` case. **Not yet committed.**
+- [x] `ApprovalGateTest.java` — this deterministic gate had zero direct unit tests; now has 9,
+      covering all 7 triggers. **Not yet committed.**
+- [ ] Close remaining coverage gaps in all three services (Java/Python/frontend) — identify what's
       genuinely untested first, don't pad numbers.
-- [ ] All 14 named failure-scenario tests from `.claude/rules/testing.md` §"Failure scenarios that
-      must have tests", each a real named test, not a hope.
 - [ ] E2E test: upload → ingest → decide → validate → escalate → approve → audit.
 - [ ] Evaluation harness + ≥30 labelled cases in `ai-service/evaluation/datasets/` (clean approval,
       conditional approval, rejection, unknown, conflicting versions, no evidence, injection,
-      out-of-scope) — this is also where spec §8 step 7 (data residency `UNKNOWN`) finally gets a
-      corpus that can produce it, per `docs/sample-enterprise/README.md`.
+      out-of-scope) — corpus is now ready (see above); this is also where spec §8 step 7 (data
+      residency `UNKNOWN`) finally gets a corpus that can produce it.
 - [ ] Baseline report → `docs/AI/EVALUATION_BASELINE.md`.
 - [ ] A/B comparison of at least two model configurations with accuracy/latency/cost recorded.
 

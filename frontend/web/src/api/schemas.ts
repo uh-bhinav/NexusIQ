@@ -22,6 +22,7 @@ export const RecommendationType = z.enum([
   'CONDITIONAL_APPROVAL',
   'REJECT',
   'INSUFFICIENT_INFORMATION',
+  'CONFLICTING_EVIDENCE',
 ])
 export const RiskLevel = z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'])
 export const AgentExecutionStatus = z.enum(['SUCCESS', 'FAILED', 'SKIPPED', 'RETRIED'])

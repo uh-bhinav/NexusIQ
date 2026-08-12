@@ -12,19 +12,21 @@ def _result(
     document_type: str = "SECURITY_POLICY",
     is_flagged: bool = False,
     similarity: float = 0.8,
+    document_name: str = "Doc",
+    document_version: int = 1,
 ) -> RetrievalResult:
     return RetrievalResult(
         chunk_id=uuid.uuid4(),
         document_id=uuid.uuid4(),
-        document_name="Doc",
+        document_name=document_name,
         document_type=document_type,
-        document_version=1,
+        document_version=document_version,
         is_current=is_current,
         content=content,
         similarity_score=similarity,
         trust_level=trust_level,
         is_flagged=is_flagged,
-        citation_reference="Doc",
+        citation_reference=document_name,
     )
 
 
@@ -105,3 +107,47 @@ def test_assembleContext_emptyResults_producesEmptyEvidenceBlock():
     assert assembly.dropped_count == 0
     assert "<retrieved_evidence>" in assembly.evidence_block
     assert "</retrieved_evidence>" in assembly.evidence_block
+
+
+def test_assembleContext_twoVersionsOfSameDocument_currentIsExplicitlyLabelledOverSuperseded():
+    # .claude/rules/testing.md's 14 required failure scenarios, #3: "Two
+    # policy versions -> newer version preferred, and it says why."
+    # test_prioritize_ordersByTheDocumentedPriorityList already proves the
+    # *ordering* half; this proves the "says why" half — the LLM receiving
+    # this block can only explain *why* it prefers v2 if the block itself
+    # distinguishes the two versions, not just orders them. Mirrors the real
+    # conflicting pair in docs/sample-enterprise/security/security-policy-
+    # v1.md (permissive) vs v2.md (EU/EEA-only, explicitly supersedes v1).
+    v1 = _result(
+        "Vendor-processed customer data may be stored and processed in any "
+        "region that provides adequate technical and organizational safeguards.",
+        document_name="Security Policy (SP-102)",
+        document_version=1,
+        is_current=False,
+        trust_level="AUTHORITATIVE",
+        similarity=0.75,
+    )
+    v2 = _result(
+        "All customer data processed on behalf of in-scope EU/EEA customers "
+        "must be stored and processed exclusively within EU/EEA data centers.",
+        document_name="Security Policy (SP-102)",
+        document_version=2,
+        is_current=True,
+        trust_level="AUTHORITATIVE",
+        similarity=0.82,
+    )
+
+    assembly = assemble_context([v1, v2], token_budget=1000)
+
+    assert "Security Policy (SP-102) (CURRENT, AUTHORITATIVE)" in assembly.evidence_block
+    assert "Security Policy (SP-102) (SUPERSEDED, AUTHORITATIVE)" in assembly.evidence_block
+    # Both texts are present — a downstream LLM has the actual conflicting
+    # clauses in front of it, not just version labels with no content to
+    # compare, so it genuinely *can* explain the disagreement.
+    assert "any region that provides adequate" in assembly.evidence_block
+    assert "exclusively within EU/EEA data centers" in assembly.evidence_block
+    # The current version sorts first (same priority tier, higher similarity
+    # per _relevance — ties within a tier go to the more relevant chunk).
+    assert assembly.evidence_block.index("(CURRENT") < assembly.evidence_block.index(
+        "(SUPERSEDED"
+    )
