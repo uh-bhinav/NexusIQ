@@ -97,6 +97,15 @@ public class SecurityConfig {
                                 "/api/v1/auth/refresh",
                                 "/actuator/health",
                                 "/actuator/info",
+                                // Phase 8: the real Prometheus container scrapes this with no
+                                // Authorization header (infrastructure/docker/prometheus/prometheus.yml
+                                // has no bearer_token/basic_auth block) — confirmed empirically that
+                                // gating it behind hasRole("ADMIN") like the rest of /actuator/**
+                                // makes every real scrape 401. Metrics counts/latencies aren't
+                                // sensitive the way other actuator endpoints (env, beans, heapdump)
+                                // are, and .claude/rules/backend-java.md already lists it alongside
+                                // health/info as meant to be "exposed" — same trust level as those.
+                                "/actuator/prometheus",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html")
