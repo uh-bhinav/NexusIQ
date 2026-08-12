@@ -20,7 +20,7 @@ must include the honest options" mandate. Fixed full-stack (Python schema + prom
 migration widening the `decisions` CHECK constraint; frontend Zod schema); V10 applied and verified
 against the live local Postgres. Also wrote `ApprovalGateTest.java` (9 tests, all 7 triggers — this
 deterministic gate had zero direct unit tests before). Also rebuilt `docs/sample-enterprise/` to the
-full 10-document, 7-subdirectory corpus per `docs/PROJECT_SPEC.md` §9. **Committed as `a90b626`.**
+full 10-document, 7-subdirectory corpus per `docs/PROJECT_SPEC.md` §9. **Committed as `0aed01f`.**
 
 (2) Built the Phase 10 E2E test: `tests/e2e/test_full_spine.py`, the one test proving the entire
 spec end to end — upload → ingest → decide → validate → escalate → approve → audit — through real,
@@ -41,7 +41,7 @@ document content. `make test-e2e` added (checks both services are reachable firs
 not — this suite is deliberately not part of `make test`, which is fully hermetic/Testcontainers-
 managed and requires nothing pre-running; see `docs/TESTING/STRATEGY.md`'s "few E2E tests"
 guidance). Live-run twice for repeatability, confirmed passing both times; full `pytest` (189/189,
-unaffected by the config change) rerun afterward as a regression check. **Committed as `487ebff`.**
+unaffected by the config change) rerun afterward as a regression check. **Committed as `029b020`.**
 
 (3) Built the AI evaluation harness (`docs/AI/EVALUATION.md`): `ai-service/app/evaluation/`
 (`models.py`, `metrics.py`, `corpus.py`, `harness.py`) + a 30-case labelled dataset
@@ -95,11 +95,11 @@ baseline `docs/AI/EVALUATION.md` calls for.
 `make eval` added (`PROVIDER=mock|gemini`, `CASE=EVAL-007` for a single case — both wired through
 to the harness CLI). Full `ai-service` `pytest` suite rerun afterward: 208/208 (189 prior + 19 new),
 confirming zero regressions from the new `app/evaluation/` package. `ruff`/`mypy --strict` clean.
-**Committed as `2623d52`.**
+**Committed as `a4f3c76`.**
 
 Asked the user explicitly before spending real Gemini quota, per the above. They chose a small
 representative subset (one case per category, 8 of 9 categories) over the full 30. `--case` was
-extended to accept a comma-separated list for this (`3f73388`). Ran it — **all 8 cases failed
+extended to accept a comma-separated list for this (`f1926b3`). Ran it — **all 8 cases failed
 immediately with `429 RESOURCE_EXHAUSTED`**: today's free-tier daily quota was already exhausted
 (most likely by this same session's earlier Phase 8/9 live-verification calls). This did prove one
 thing genuinely useful: the harness's own error handling works correctly under a real failure — each
@@ -1410,7 +1410,7 @@ the exact prior behavior.
 Not yet done this phase: the evaluation harness itself (retrieval recall@k/precision@k/MRR,
 generation groundedness/citation validity, decision accuracy — `docs/AI/EVALUATION.md`), ≥30
 labelled cases, a baseline report, and an A/B model comparison. All of this phase's work described
-above (both the failure-scenario-gap work, already committed as `a90b626`, and the E2E test) is
+above (both the failure-scenario-gap work, already committed as `0aed01f`, and the E2E test) is
 implemented and verified; the E2E test itself is **not yet committed** — see "Recommended next
 action".
 
@@ -1824,15 +1824,15 @@ work, but newly surfaced by it, and now fixed**: `git status` showed the *entire
 Python codebase and `frontend/web/` directory, plus most of the newer `backend/spring-api` packages
 (`approval/`, `decision/`, `knowledge/`, `messaging/`, `observability/`, `streaming/`, migrations
 V5–V9), as **untracked** — never committed. Only Phase 0/1's foundational Java work had made it
-into git history (`774a14c`, `4a8220c`, `4c41cb0`, `3495982`); everything from Phase 2 onward,
+into git history (`0c15435`, `91c93e3`, `5f9eb05`, `0c286f3`); everything from Phase 2 onward,
 including this entire multi-round session's work, existed only on disk — a real risk (loss on disk
 failure, an accidental `git clean`, etc.). Flagged directly to the user rather than acted on
 unilaterally (`CLAUDE.md` requires explicit permission before committing); the user asked for it to
-be committed now. Landed as 9 commits grouped by phase/service — `6ddb282` (Phase 2-3: documents,
-storage, knowledge search), `1dcdc69` (Phase 5-6: decision lifecycle, Kafka messaging), `054f4c1`
-(Phase 7: approvals), `e32f8dc` (Phase 8: observability), `72db6c2`/`feb9a65` (Phase 9 backend: SSE
-streaming, the pagination sort fix), `632d91d` (Phase 2-6: the entire Python AI service +
-sample corpus), `e206252` (Phase 9: the entire frontend), `5f41d5f` (infra config + docs catch-up).
+be committed now. Landed as 9 commits grouped by phase/service — `4abdf4f` (Phase 2-3: documents,
+storage, knowledge search), `ce19f07` (Phase 5-6: decision lifecycle, Kafka messaging), `ac67c10`
+(Phase 7: approvals), `88c2779` (Phase 8: observability), `81176ee`/`c0d743a` (Phase 9 backend: SSE
+streaming, the pagination sort fix), `8b52ebd` (Phase 2-6: the entire Python AI service +
+sample corpus), `c1ead12` (Phase 9: the entire frontend), `be333e9` (infra config + docs catch-up).
 Verified `.env` and all credential-shaped files stayed correctly excluded throughout (`git
 check-ignore`, plus a manual scan for secret-looking filenames) before staging anything. One caveat
 worth recording honestly: because this reconstructs history that should have existed incrementally

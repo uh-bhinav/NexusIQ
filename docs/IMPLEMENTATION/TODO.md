@@ -53,7 +53,7 @@ Phase 11 progress (2026-08-12):
       `astral-sh/setup-uv@v9` turned out to be the one repo of the ten with no bare major alias;
       pinned to the exact `v9.0.0` instead. See STATUS.md's Phase 11 entry for the full trace,
       including before/after timings once the GHA build cache warmed up (`docker-build(ai-service)`
-      24 min → 3m35s). **Committed across `72ecd6e`, `0333e85`, `8dc420b`, `b5b1b5c`.**
+      24 min → 3m35s). **Committed across `8e9ba2d`, `f41ba48`, `e23603e`, `9830d11`.**
 - [ ] Branch protection requiring the pipeline to pass before merge (now that the final check names
       are known from a fully green run).
 - [ ] Verify the one remaining acceptance criterion not yet demonstrated: a deliberately-broken
