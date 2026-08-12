@@ -1,0 +1,26 @@
+{
+  "evidence_grounding": {
+    "check": "EVIDENCE_GROUNDING",
+    "passed": true,
+    "details": "Every substantive claim in the recommendation is supported by the findings and risk assessment.",
+    "offending_claims": []
+  },
+  "contradiction": {
+    "check": "CONTRADICTION",
+    "passed": true,
+    "details": "The recommendation does not contradict the retrieved evidence, findings, or risk assessment.",
+    "offending_claims": []
+  },
+  "hallucination": {
+    "check": "HALLUCINATION",
+    "passed": true,
+    "details": "No fact, policy, section reference, or certification is stated that does not appear in the evidence.",
+    "offending_claims": []
+  },
+  "confidence_justification": {
+    "check": "CONFIDENCE_JUSTIFICATION",
+    "passed": true,
+    "details": "The stated confidence is consistent with the coverage and quality of the findings and risk assessment.",
+    "offending_claims": []
+  }
+}

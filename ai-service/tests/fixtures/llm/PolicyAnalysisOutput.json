@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "policy_name": "Data Residency Policy",
+      "policy_reference": "SP-102 §1",
+      "status": "SATISFIED",
+      "explanation": "The evidence confirms EU/EEA data center requirements are documented.",
+      "evidence_ids": ["E1"],
+      "confidence": 0.85
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+[project]
+name = "nexusiq-ai-service"
+version = "0.1.0"
+description = "NexusIQ AI service — ingestion, retrieval, LangGraph agents, guardrails, evaluation"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "pgvector>=0.3",
+    "aiokafka>=0.12",
+    "sentence-transformers>=3.3",
+    "pdfplumber>=0.11",
+    "python-docx>=1.1",
+    "redis>=5.0",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp>=1.28",
+    "google-genai>=2.17.0",
+    "langgraph>=1.2.10",
+    "langgraph-checkpoint-postgres>=3.1.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+# Matches the actual interpreter this project develops against (3.13, per
+# uv venv); requires-python's 3.11 is the minimum supported floor, not the
+# type-checking target. Pinning mypy to 3.11 breaks on numpy's own stubs,
+# which use 3.12+ syntax (transitive via sentence-transformers/torch).
+python_version = "3.13"
+strict = true
+packages = ["app"]
+
+[[tool.mypy.overrides]]
+module = "aiokafka.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# One event loop for the whole test session: app/db/session.py's async engine
+# is a module-level singleton (matches production, where it's created once at
+# app startup) — a function-scoped loop per test would try to reuse pooled
+# asyncpg connections across different loops and fail.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]

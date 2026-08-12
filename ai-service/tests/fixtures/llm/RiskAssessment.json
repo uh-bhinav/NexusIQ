@@ -1,0 +1,14 @@
+{
+  "risk_level": "LOW",
+  "factors": [
+    {
+      "category": "DATA",
+      "description": "Data residency evidence is present and current.",
+      "severity": "LOW",
+      "likelihood": "UNLIKELY",
+      "evidence_ids": ["E1"]
+    }
+  ],
+  "missing_information": [],
+  "confidence": 0.8
+}
